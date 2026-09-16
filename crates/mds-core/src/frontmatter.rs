@@ -31,19 +31,14 @@ struct Frontmatter {
 }
 
 /// `$schema` キーの値。キーの有無と null を区別する（R2 は null を誤りにする）。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 enum SchemaValue {
     /// キーが無い。スキーマを持たない文書
+    #[default]
     Missing,
     /// キーはあるが値が null（`$schema:` や `$schema: null`）
     Null,
     Value(String),
-}
-
-impl Default for SchemaValue {
-    fn default() -> Self {
-        SchemaValue::Missing
-    }
 }
 
 /// `$schema` の値が文字列であるか、null であるかを判別する。null とキー無しを
