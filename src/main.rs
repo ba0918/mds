@@ -191,8 +191,11 @@ fn load_schema_yaml(doc_path: &Path, schema_ref: &SchemaRef) -> Result<String, S
         }),
         ResolvedSchema::Url(url) => {
             let cache = cache_path(&url);
+            // キャッシュを読めたら内容を検証し、壊れた・空なら URL から再取得する
             if let Ok(content) = std::fs::read_to_string(&cache) {
-                return Ok(content);
+                if mds_core::schema::parse_schema(&content).is_ok() {
+                    return Ok(content);
+                }
             }
             let mut response = ureq::get(&url)
                 .config()
