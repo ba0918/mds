@@ -279,3 +279,99 @@ fn values_without_schema_stops_with_schema_not_found() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("schema_not_found"));
 }
+
+const DIR_SCHEMA: &str = r#"
+document:
+  title:
+    pattern: "^T-\\d+:"
+  sections:
+    - name: 状況
+      statement:
+        required: false
+"#;
+
+fn good_doc() -> &'static str {
+    "---\n$schema: ./schema.yaml\n---\n# T-1: 例\n\n## 状況\n\n本文。\n"
+}
+
+fn bad_doc() -> &'static str {
+    "---\n$schema: ./schema.yaml\n---\n# T-1: 例\n\n## 状況\n\n本文。\n\n## 補足\n\n本文。\n"
+}
+
+#[test]
+fn check_directory_reports_all_failing_documents() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(dir.path(), "schema.yaml", DIR_SCHEMA);
+    write_file(dir.path(), "good.md", good_doc());
+    write_file(dir.path(), "bad.md", bad_doc());
+    write_file(dir.path(), "noschema.md", "# スキーマなし\n");
+    let output = mds()
+        .args(["check", dir.path().to_str().unwrap(), "--format", "json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let files = json["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+    assert!(files[0]["path"].as_str().unwrap().ends_with("bad.md"));
+    assert_eq!(files[0]["findings"][0]["kind"], "undeclared_heading");
+}
+
+#[test]
+fn check_directory_skips_hidden_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(dir.path(), "schema.yaml", DIR_SCHEMA);
+    write_file(dir.path(), "good.md", good_doc());
+    write_file(dir.path(), ".hidden/bad.md", bad_doc());
+    let output = mds()
+        .args(["check", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn check_directory_does_not_follow_symlinks() {
+    let outside = tempfile::tempdir().unwrap();
+    let external = write_file(outside.path(), "external.md", bad_doc());
+    let dir = tempfile::tempdir().unwrap();
+    write_file(dir.path(), "schema.yaml", DIR_SCHEMA);
+    write_file(dir.path(), "good.md", good_doc());
+    std::os::unix::fs::symlink(&external, dir.path().join("link.md")).unwrap();
+    let output = mds()
+        .args(["check", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn check_directory_stops_on_invalid_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(dir.path(), "schema.yaml", "document: [\n");
+    write_file(dir.path(), "doc.md", good_doc());
+    let output = mds()
+        .args(["check", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("schema_invalid"));
+}
+
+#[test]
+fn check_directory_stops_on_unreadable_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_file(dir.path(), "secret.md", good_doc());
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let output = mds()
+        .args(["check", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unreadable_file"));
+}

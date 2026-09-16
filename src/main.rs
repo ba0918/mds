@@ -6,6 +6,7 @@ use mds_core::schema::Schema;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use walkdir::WalkDir;
 
 #[derive(Parser)]
 #[command(
@@ -122,11 +123,22 @@ fn run(cli: Cli) -> Result<u8, Stop> {
             open,
         } => {
             if path.is_dir() {
-                check_directory(&path, &format, open)
+                let files = check_directory(&path, open)?;
+                emit_check(&files, &format)?;
+                Ok(if files.iter().any(|(_, f)| !f.is_empty()) {
+                    1
+                } else {
+                    0
+                })
             } else {
                 let findings = check_document(&path, open)?;
-                emit_check(&path, &findings, &format)?;
-                Ok(if findings.is_empty() { 0 } else { 1 })
+                let files = vec![(path, findings)];
+                emit_check(&files, &format)?;
+                Ok(if files.iter().any(|(_, f)| !f.is_empty()) {
+                    1
+                } else {
+                    0
+                })
             }
         }
     }
@@ -179,37 +191,50 @@ fn load_schema_yaml(doc_path: &Path, schema_ref: &SchemaRef) -> Result<String, S
     }
 }
 
-fn emit_check(path: &Path, findings: &[Finding], format: &str) -> Result<(), Stop> {
-    if findings.is_empty() {
+fn emit_check(files: &[(PathBuf, Vec<Finding>)], format: &str) -> Result<(), Stop> {
+    let non_empty: Vec<&(PathBuf, Vec<Finding>)> =
+        files.iter().filter(|(_, findings)| !findings.is_empty()).collect();
+    if non_empty.is_empty() {
         return Ok(());
     }
-    let path_str = path.to_string_lossy();
     match format {
         "text" => {
-            for finding in findings {
-                match finding.line {
-                    Some(line) => println!(
-                        "{path_str}:{line}: {}: {}",
-                        finding.kind.as_str(),
-                        finding.detail
-                    ),
-                    None => println!("{path_str}: {}: {}", finding.kind.as_str(), finding.detail),
+            for (path, findings) in &non_empty {
+                let path_str = path.to_string_lossy();
+                for finding in findings {
+                    match finding.line {
+                        Some(line) => println!(
+                            "{path_str}:{line}: {}: {}",
+                            finding.kind.as_str(),
+                            finding.detail
+                        ),
+                        None => {
+                            println!("{path_str}: {}: {}", finding.kind.as_str(), finding.detail)
+                        }
+                    }
                 }
             }
         }
         "json" => {
-            let findings_json: Vec<FindingJson> = findings
+            let files_json: Vec<serde_json::Value> = non_empty
                 .iter()
-                .map(|f| FindingJson {
-                    kind: f.kind.as_str(),
-                    severity: "error",
-                    path: &path_str,
-                    line: f.line,
-                    detail: &f.detail,
+                .map(|(path, findings)| {
+                    let path_str = path.to_string_lossy();
+                    let findings_json: Vec<FindingJson> = findings
+                        .iter()
+                        .map(|f| FindingJson {
+                            kind: f.kind.as_str(),
+                            severity: "error",
+                            path: &path_str,
+                            line: f.line,
+                            detail: &f.detail,
+                        })
+                        .collect();
+                    serde_json::json!({ "path": path_str, "findings": findings_json })
                 })
                 .collect();
-            let files = serde_json::json!({ "files": [{ "path": path_str, "findings": findings_json }] });
-            println!("{}", serde_json::to_string_pretty(&files).unwrap());
+            let output = serde_json::json!({ "files": files_json });
+            println!("{}", serde_json::to_string_pretty(&output).unwrap());
         }
         _ => {
             return Err(Stop {
@@ -219,6 +244,58 @@ fn emit_check(path: &Path, findings: &[Finding], format: &str) -> Result<(), Sto
         }
     }
     Ok(())
+}
+
+/// ディレクトリ配下のスキーマ宣言文書を検査する。R20。
+fn check_directory(root: &Path, open_flag: bool) -> Result<Vec<(PathBuf, Vec<Finding>)>, Stop> {
+    let mut files = Vec::new();
+    let walker = WalkDir::new(root)
+        .follow_links(false)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|entry| {
+            // 隠しディレクトリと .mds/ は辿らない。ルート自身は除く。
+            if entry.depth() == 0 || !entry.file_type().is_dir() {
+                return true;
+            }
+            !entry.file_name().to_string_lossy().starts_with('.')
+        });
+
+    for entry in walker {
+        let entry = entry.map_err(|e| Stop {
+            kind: "unreadable_file",
+            detail: format!("cannot walk {}: {}", root.display(), e),
+        })?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        if entry.path().extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let path = entry.path().to_path_buf();
+        let src = read_document(&path)?;
+        let schema_ref = mds_core::frontmatter::frontmatter_schema(&src).map_err(|e| Stop {
+            kind: "frontmatter_invalid",
+            detail: format!("{}: {}", path.display(), e.0),
+        })?;
+        // スキーマを持たない文書は対象外
+        let Some(schema_ref) = schema_ref else {
+            continue;
+        };
+        let schema_yaml = load_schema_yaml(&path, &schema_ref)?;
+        let schema = mds_core::schema::parse_schema(&schema_yaml).map_err(|e| Stop {
+            kind: "schema_invalid",
+            detail: format!("{}: {}", path.display(), e.0),
+        })?;
+        let document = Document::parse(&src).map_err(|e| Stop {
+            kind: "unreadable_file",
+            detail: format!("{}: {}", path.display(), e),
+        })?;
+        let open = open_flag || schema.open;
+        let findings = mds_core::validate::validate(&schema, &document, open);
+        files.push((path, findings));
+    }
+    Ok(files)
 }
 
 /// 文書を読み、先頭の BOM を取り除いて返す。
@@ -231,13 +308,5 @@ fn read_document(path: &Path) -> Result<String, Stop> {
     String::from_utf8(bytes.to_vec()).map_err(|e| Stop {
         kind: "unreadable_file",
         detail: format!("{}: {}", path.display(), e),
-    })
-}
-
-fn check_directory(_path: &Path, _format: &str, _open: bool) -> Result<u8, Stop> {
-    // Step 11 でディレクトリ検査を実装する
-    Err(Stop {
-        kind: "unreadable_file",
-        detail: "directory checking is not implemented yet".into(),
     })
 }
