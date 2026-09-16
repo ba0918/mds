@@ -15,10 +15,22 @@ pub fn validate(schema: &Schema, document: &Document, open: bool) -> Vec<Finding
 
     if let Some(title) = &doc_rule.title {
         validate_title(title, &document.titles, &mut findings);
+    } else if !open {
+        // title 規則が無い `#` 見出しは閉じた世界で undeclared_heading（R13）
+        for heading in &document.titles {
+            findings.push(Finding {
+                kind: FindingKind::UndeclaredHeading,
+                line: Some(heading.line),
+                detail: format!("undeclared title heading \"{}\"", heading.text),
+            });
+        }
     }
 
+    // 宣言済みの前置部は open でも未宣言の行を誤りにする。宣言していない
+    // 前置部の内側の行は閉じた世界だけで誤りにする。
+    let effective_open = if doc_rule.preamble.is_some() { false } else { open };
     let rules = ContainerRules::for_preamble(doc_rule.preamble.as_ref());
-    validate_container(&rules, &document.preamble, open, &mut findings);
+    validate_container(&rules, &document.preamble, effective_open, &mut findings);
 
     let mut section_counts: HashMap<&str, usize> = HashMap::new();
     for section in &document.sections {
@@ -29,16 +41,30 @@ pub fn validate(schema: &Schema, document: &Document, open: bool) -> Vec<Finding
         match doc_rule.sections.iter().find(|def| def.name == section.name) {
             Some(def) => {
                 let rules = ContainerRules::for_section(def);
-                validate_container(&rules, &section.blocks, open, &mut findings);
-                validate_items(def, &section.items, open, &mut findings);
+                validate_container(&rules, &section.blocks, false, &mut findings);
+                validate_items(def, &section.items, &mut findings);
             }
             None => {
+                // 宣言していない節は、閉じた世界で見出しと内側の行を誤りにする
                 if !open {
                     findings.push(Finding {
                         kind: FindingKind::UndeclaredHeading,
                         line: Some(section.line),
                         detail: format!("undeclared section heading \"{}\"", section.name),
                     });
+                    for block in &section.blocks {
+                        findings.push(undeclared_line_for_block(block));
+                    }
+                    for item in &section.items {
+                        findings.push(Finding {
+                            kind: FindingKind::UndeclaredHeading,
+                            line: Some(item.line),
+                            detail: format!("undeclared item heading \"{}\"", item.id),
+                        });
+                        for block in &item.blocks {
+                            findings.push(undeclared_line_for_block(block));
+                        }
+                    }
                 }
             }
         }
@@ -99,20 +125,17 @@ fn validate_title(title: &Title, headings: &[Heading], findings: &mut Vec<Findin
     }
 }
 
-fn validate_items(
-    section: &Section,
-    items: &[Item],
-    open: bool,
-    findings: &mut Vec<Finding>,
-) {
+fn validate_items(section: &Section, items: &[Item], findings: &mut Vec<Finding>) {
     let Some(item_rule) = &section.item else {
-        if !open {
-            for item in items {
-                findings.push(Finding {
-                    kind: FindingKind::UndeclaredHeading,
-                    line: Some(item.line),
-                    detail: format!("undeclared item heading \"{}\"", item.id),
-                });
+        // 宣言済みの節の中に足された未宣言の項目。open でも見出しと内側の行を誤りにする（R13）
+        for item in items {
+            findings.push(Finding {
+                kind: FindingKind::UndeclaredHeading,
+                line: Some(item.line),
+                detail: format!("undeclared item heading \"{}\"", item.id),
+            });
+            for block in &item.blocks {
+                findings.push(undeclared_line_for_block(block));
             }
         }
         return;
@@ -133,7 +156,7 @@ fn validate_items(
             }
         }
         let rules = ContainerRules::for_item(item_rule);
-        validate_container(&rules, &item.blocks, open, findings);
+        validate_container(&rules, &item.blocks, false, findings);
     }
 
     let count = items.len() as u64;
@@ -224,6 +247,25 @@ impl<'a> ContainerRules<'a> {
     }
 }
 
+/// 宣言されていない行の指摘をブロックの種別に応じた文言で作る。
+fn undeclared_line_for_block(block: &Block) -> Finding {
+    let (detail, line) = match block {
+        Block::Field { name, line, .. } => (format!("undeclared field line \"{name}\""), *line),
+        Block::Bullet { text, line, .. } => (format!("undeclared bullet \"{text}\""), *line),
+        Block::Statement { text, line, .. } => {
+            (format!("undeclared statement \"{text}\""), *line)
+        }
+        Block::Table { line, .. } => ("undeclared table".to_string(), *line),
+        Block::Code { line, .. } => ("undeclared code block".to_string(), *line),
+        Block::Other { line } => ("line is not allowed by the schema".to_string(), *line),
+    };
+    Finding {
+        kind: FindingKind::UndeclaredLine,
+        line: Some(line),
+        detail,
+    }
+}
+
 fn validate_container(
     rules: &ContainerRules,
     blocks: &[Block],
@@ -279,11 +321,7 @@ fn validate_container(
                     }
                     None => {
                         if !open {
-                            findings.push(Finding {
-                                kind: FindingKind::UndeclaredLine,
-                                line: Some(*line),
-                                detail: format!("undeclared field line \"{name}\""),
-                            });
+                            findings.push(undeclared_line_for_block(block));
                         }
                     }
                 }
@@ -308,11 +346,7 @@ fn validate_container(
                 }
                 None => {
                     if !open {
-                        findings.push(Finding {
-                            kind: FindingKind::UndeclaredLine,
-                            line: Some(*line),
-                            detail: format!("undeclared bullet \"{text}\""),
-                        });
+                        findings.push(undeclared_line_for_block(block));
                     }
                 }
             },
@@ -347,11 +381,7 @@ fn validate_container(
                 }
                 None => {
                     if !open {
-                        findings.push(Finding {
-                            kind: FindingKind::UndeclaredLine,
-                            line: Some(*line),
-                            detail: format!("undeclared statement \"{text}\""),
-                        });
+                        findings.push(undeclared_line_for_block(block));
                     }
                 }
             },
@@ -384,11 +414,7 @@ fn validate_container(
                 }
                 None => {
                     if !open {
-                        findings.push(Finding {
-                            kind: FindingKind::UndeclaredLine,
-                            line: Some(*line),
-                            detail: "undeclared table".into(),
-                        });
+                        findings.push(undeclared_line_for_block(block));
                     }
                 }
             },
@@ -428,21 +454,13 @@ fn validate_container(
                 }
                 None => {
                     if !open {
-                        findings.push(Finding {
-                            kind: FindingKind::UndeclaredLine,
-                            line: Some(*line),
-                            detail: "undeclared code block".into(),
-                        });
+                        findings.push(undeclared_line_for_block(block));
                     }
                 }
             },
-            Block::Other { line } => {
+            Block::Other { .. } => {
                 if !open {
-                    findings.push(Finding {
-                        kind: FindingKind::UndeclaredLine,
-                        line: Some(*line),
-                        detail: "line is not allowed by the schema".into(),
-                    });
+                    findings.push(undeclared_line_for_block(block));
                 }
             }
         }
@@ -778,6 +796,69 @@ document:
         assert!(!ks.contains(&FindingKind::UndeclaredHeading));
         assert!(!ks.contains(&FindingKind::UndeclaredLine));
         assert!(ks.contains(&FindingKind::MissingRequiredSection));
+    }
+
+    #[test]
+    fn title_without_rule_is_undeclared_heading_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let doc = "# 題名\n\n## 状況\n\n背景。\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::UndeclaredHeading));
+    }
+
+    #[test]
+    fn title_without_rule_is_allowed_when_open() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let doc = "# 題名\n\n## 状況\n\n背景。\n";
+        let findings = validate_src(schema, doc, true);
+        assert!(!kinds(&findings).contains(&FindingKind::UndeclaredHeading));
+    }
+
+    #[test]
+    fn undeclared_section_lines_are_flagged_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let doc = "# 題名\n\n## 状況\n\n背景。\n\n## 補足\n\n- 余計な箇条書き\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::UndeclaredHeading));
+        assert!(kinds(&findings).contains(&FindingKind::UndeclaredLine));
+    }
+
+    #[test]
+    fn undeclared_section_lines_are_allowed_when_open() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let doc = "# 題名\n\n## 状況\n\n背景。\n\n## 補足\n\n- 余計な箇条書き\n";
+        let findings = validate_src(schema, doc, true);
+        assert!(!kinds(&findings).contains(&FindingKind::UndeclaredHeading));
+        assert!(!kinds(&findings).contains(&FindingKind::UndeclaredLine));
+    }
+
+    #[test]
+    fn undeclared_item_inside_declared_section_is_flagged_even_when_open() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      statement:
+        required: false
+"#;
+        let doc = "## 要求\n\n### REQ-001: 名前\n\n本文。\n";
+        let findings = validate_src(schema, doc, true);
+        assert!(kinds(&findings).contains(&FindingKind::UndeclaredHeading));
+        assert!(kinds(&findings).contains(&FindingKind::UndeclaredLine));
+    }
+
+    #[test]
+    fn undeclared_line_in_declared_section_is_flagged_even_when_open() {
+        let schema = r#"
+document:
+  sections:
+    - name: 状況
+      statement:
+        required: false
+"#;
+        let doc = "## 状況\n\n本文。\n\n- 宣言外の箇条書き\n";
+        let findings = validate_src(schema, doc, true);
+        assert!(kinds(&findings).contains(&FindingKind::UndeclaredLine));
     }
 
     // ---- R8〜R12: 行の規則 ----
