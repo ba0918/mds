@@ -174,6 +174,9 @@ fn load_schema_and_document(path: &Path, src: &str) -> Result<(Schema, Document)
     Ok((schema, document))
 }
 
+/// URL スキーマの応答の読み込み上限。壊れたサーバがメモリを食い潰すのを防ぐ。
+const MAX_SCHEMA_BYTES: u64 = 4 * 1024 * 1024;
+
 /// `$schema` の参照を解決してスキーマ YAML の文字列を読む。URL はキャッシュを優先する。
 fn load_schema_yaml(doc_path: &Path, schema_ref: &SchemaRef) -> Result<String, Stop> {
     match mds_core::frontmatter::resolve_schema(doc_path, schema_ref) {
@@ -194,6 +197,9 @@ fn load_schema_yaml(doc_path: &Path, schema_ref: &SchemaRef) -> Result<String, S
                 })?;
             let body = response
                 .body_mut()
+                .with_config()
+                .limit(MAX_SCHEMA_BYTES)
+                .lossy_utf8(true)
                 .read_to_string()
                 .map_err(|e| Stop {
                     kind: "schema_not_found",
