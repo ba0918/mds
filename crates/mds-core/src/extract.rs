@@ -2,7 +2,6 @@
 
 use crate::document::{Block, Document, Item as DocItem, Section as DocSection};
 use crate::schema::{Bullets, CodeBlock, Extract, Field, Schema, Statement, Table};
-use regex::Regex;
 use serde_json::{Map, Value};
 
 /// `values` の出力。配置パスに沿った入れ子の JSON。
@@ -60,10 +59,7 @@ fn extract_title(schema: &Schema, document: &Document, root: &mut Map<String, Va
             let Some(pattern) = &title.pattern else {
                 return;
             };
-            let Some(re) = Regex::new(pattern).ok() else {
-                return;
-            };
-            let Some(caps) = re.captures(&heading.text) else {
+            let Some(caps) = pattern.captures(&heading.text) else {
                 return;
             };
             let Some(m) = caps.name(group) else {

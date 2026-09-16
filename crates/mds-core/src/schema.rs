@@ -1,7 +1,43 @@
 //! スキーマ YAML のモデルと読み込み。
 
 use regex::Regex;
-use serde::Deserialize;
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer};
+
+/// スキーマに書かれた正規表現。読み込み時に一度だけコンパイルし、以後は再利用する。
+#[derive(Debug, Clone)]
+pub struct Pattern {
+    source: String,
+    compiled: Regex,
+}
+
+impl Pattern {
+    /// 文字列に一致するか。
+    pub fn is_match(&self, text: &str) -> bool {
+        self.compiled.is_match(text)
+    }
+
+    /// 名前付きキャプチャを含む最初の一致を取る。
+    pub fn captures<'h>(&self, text: &'h str) -> Option<regex::Captures<'h>> {
+        self.compiled.captures(text)
+    }
+
+    /// スキーマに書かれた正規表現の文字列。
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+}
+
+impl<'de> Deserialize<'de> for Pattern {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let source = String::deserialize(deserializer)?;
+        let compiled = Regex::new(&source).map_err(D::Error::custom)?;
+        Ok(Pattern { source, compiled })
+    }
+}
 
 /// スキーマを読めなかった理由。R19 の `schema_invalid` に相当する。
 #[derive(Debug)]
@@ -34,7 +70,7 @@ pub struct Document {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Title {
-    pub pattern: Option<String>,
+    pub pattern: Option<Pattern>,
     pub extract: Option<Extract>,
 }
 
@@ -77,7 +113,7 @@ pub struct Section {
 #[serde(deny_unknown_fields)]
 pub struct Item {
     /// 見出しの ID 部分の正規表現
-    pub id: Option<String>,
+    pub id: Option<Pattern>,
     #[serde(default)]
     pub fields: Vec<Field>,
     /// フィールド行の並び順を強制する。R8
@@ -96,7 +132,7 @@ pub struct Field {
     pub name: String,
     pub required: Option<bool>,
     pub repeat: Option<Repeat>,
-    pub pattern: Option<String>,
+    pub pattern: Option<Pattern>,
     #[serde(rename = "enum")]
     pub r#enum: Option<Vec<String>>,
     pub separator: Option<String>,
@@ -123,7 +159,7 @@ impl Field {
 pub struct Statement {
     pub required: Option<bool>,
     pub repeat: Option<Repeat>,
-    pub pattern: Option<String>,
+    pub pattern: Option<Pattern>,
     #[serde(rename = "enum")]
     pub r#enum: Option<Vec<String>>,
     pub when: Option<When>,
@@ -136,7 +172,7 @@ pub struct Statement {
 pub struct Bullets {
     pub required: Option<bool>,
     pub repeat: Option<Repeat>,
-    pub pattern: Option<String>,
+    pub pattern: Option<Pattern>,
     pub when: Option<When>,
     pub extract: Option<Extract>,
 }
@@ -157,7 +193,7 @@ pub struct Table {
 pub struct CodeBlock {
     pub lang: Option<String>,
     /// ブロック内の行ごとの規則。各行がパターンのいずれかに一致すること
-    pub lines: Option<Vec<String>>,
+    pub lines: Option<Vec<Pattern>>,
     pub required: Option<bool>,
     pub repeat: Option<Repeat>,
     pub extract: Option<Extract>,
@@ -221,9 +257,6 @@ pub fn parse_schema(yaml: &str) -> Result<Schema, SchemaError> {
 }
 
 fn validate_schema(schema: &Schema) -> Result<(), SchemaError> {
-    if let Some(title) = &schema.document.title {
-        check_patterns(title.pattern.as_deref(), "title.pattern")?;
-    }
     if let Some(preamble) = &schema.document.preamble {
         validate_preamble(preamble)?;
     }
@@ -256,9 +289,6 @@ fn validate_section(section: &Section) -> Result<(), SchemaError> {
         if let Some(repeat) = &codeblock.repeat {
             repeat.validate()?;
         }
-        for (i, line) in codeblock.lines.iter().flatten().enumerate() {
-            check_regex(line, &format!("codeblock.lines[{i}]"))?;
-        }
     }
     if let Some(item) = &section.item {
         validate_item(item)?;
@@ -267,7 +297,6 @@ fn validate_section(section: &Section) -> Result<(), SchemaError> {
 }
 
 fn validate_item(item: &Item) -> Result<(), SchemaError> {
-    check_patterns(item.id.as_deref(), "item.id")?;
     if let Some(repeat) = &item.repeat {
         repeat.validate()?;
     }
@@ -279,7 +308,6 @@ fn validate_item(item: &Item) -> Result<(), SchemaError> {
 
 fn validate_fields(fields: &[Field]) -> Result<(), SchemaError> {
     for field in fields {
-        check_patterns(field.pattern.as_deref(), &format!("field.{}.pattern", field.name))?;
         if let Some(repeat) = &field.repeat {
             repeat.validate()?;
         }
@@ -292,7 +320,6 @@ fn validate_fields(fields: &[Field]) -> Result<(), SchemaError> {
 
 fn validate_statement(statement: Option<&Statement>) -> Result<(), SchemaError> {
     if let Some(statement) = statement {
-        check_patterns(statement.pattern.as_deref(), "statement.pattern")?;
         if let Some(repeat) = &statement.repeat {
             repeat.validate()?;
         }
@@ -305,7 +332,6 @@ fn validate_statement(statement: Option<&Statement>) -> Result<(), SchemaError> 
 
 fn validate_bullets(bullets: Option<&Bullets>) -> Result<(), SchemaError> {
     if let Some(bullets) = bullets {
-        check_patterns(bullets.pattern.as_deref(), "bullets.pattern")?;
         if let Some(repeat) = &bullets.repeat {
             repeat.validate()?;
         }
@@ -313,18 +339,6 @@ fn validate_bullets(bullets: Option<&Bullets>) -> Result<(), SchemaError> {
             when.validate()?;
         }
     }
-    Ok(())
-}
-
-fn check_patterns(pattern: Option<&str>, where_: &str) -> Result<(), SchemaError> {
-    if let Some(pattern) = pattern {
-        check_regex(pattern, where_)?;
-    }
-    Ok(())
-}
-
-fn check_regex(pattern: &str, where_: &str) -> Result<(), SchemaError> {
-    Regex::new(pattern).map_err(|e| SchemaError(format!("{where_}: 正規表現が不正: {e}")))?;
     Ok(())
 }
 
@@ -390,7 +404,7 @@ document:
         assert!(section.table.is_some());
         assert!(section.codeblock.is_some());
         let item = section.item.as_ref().unwrap();
-        assert_eq!(item.id.as_deref(), Some("REQ-\\d{3,}"));
+        assert_eq!(item.id.as_ref().map(|p| p.source()), Some("REQ-\\d{3,}"));
         assert_eq!(item.repeat.as_ref().unwrap().max, Some(5));
         assert_eq!(item.fields[1].when.as_ref().unwrap().eq.as_deref(), Some("algorithm"));
     }

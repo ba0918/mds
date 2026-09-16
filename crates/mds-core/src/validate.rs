@@ -6,7 +6,6 @@ use crate::schema::{
     Bullets, CodeBlock, Field, Item as ItemRule, Preamble, Repeat, Schema, Section, Statement,
     Table, Title, When,
 };
-use regex::Regex;
 use std::collections::HashMap;
 
 /// スキーマと文書の木から指摘を集める。`open` は閉じた世界を緩めるか（スキーマの `open` と CLI の `--open` を合わせた値）。
@@ -84,13 +83,14 @@ fn validate_title(title: &Title, headings: &[Heading], findings: &mut Vec<Findin
         _ => {
             let heading = &headings[0];
             if let Some(pattern) = &title.pattern {
-                if !regex_matches(pattern, &heading.text) {
+                if !pattern.is_match(&heading.text) {
                     findings.push(Finding {
                         kind: FindingKind::TitlePatternMismatch,
                         line: Some(heading.line),
                         detail: format!(
                             "title \"{}\" does not match pattern \"{}\"",
-                            heading.text, pattern
+                            heading.text,
+                            pattern.source()
                         ),
                     });
                 }
@@ -120,13 +120,14 @@ fn validate_items(
 
     for item in items {
         if let Some(id_pattern) = &item_rule.id {
-            if !regex_matches(id_pattern, &item.id) {
+            if !id_pattern.is_match(&item.id) {
                 findings.push(Finding {
                     kind: FindingKind::InvalidId,
                     line: Some(item.line),
                     detail: format!(
                         "item id \"{}\" does not match pattern \"{}\"",
-                        item.id, id_pattern
+                        item.id,
+                        id_pattern.source()
                     ),
                 });
             }
@@ -251,12 +252,13 @@ fn validate_container(
                             };
                             for v in &values {
                                 if let Some(pattern) = &field.pattern {
-                                    if !regex_matches(pattern, v) {
+                                    if !pattern.is_match(v) {
                                         findings.push(Finding {
                                             kind: FindingKind::FieldPatternMismatch,
                                             line: Some(*line),
                                             detail: format!(
-                                                "value \"{v}\" does not match pattern \"{pattern}\""
+                                                "value \"{v}\" does not match pattern \"{}\"",
+                                                pattern.source()
                                             ),
                                         });
                                     }
@@ -291,12 +293,13 @@ fn validate_container(
                     bullet_count += 1;
                     if when_allows(bullets.when.as_ref(), blocks) {
                         if let Some(pattern) = &bullets.pattern {
-                            if !regex_matches(pattern, text) {
+                            if !pattern.is_match(text) {
                                 findings.push(Finding {
                                     kind: FindingKind::BulletPatternMismatch,
                                     line: Some(*line),
                                     detail: format!(
-                                        "bullet \"{text}\" does not match pattern \"{pattern}\""
+                                        "bullet \"{text}\" does not match pattern \"{}\"",
+                                        pattern.source()
                                     ),
                                 });
                             }
@@ -318,12 +321,13 @@ fn validate_container(
                     statement_count += 1;
                     if when_allows(statement.when.as_ref(), blocks) {
                         if let Some(pattern) = &statement.pattern {
-                            if !regex_matches(pattern, text) {
+                            if !pattern.is_match(text) {
                                 findings.push(Finding {
                                     kind: FindingKind::StatementPatternMismatch,
                                     line: Some(*line),
                                     detail: format!(
-                                        "statement \"{text}\" does not match pattern \"{pattern}\""
+                                        "statement \"{text}\" does not match pattern \"{}\"",
+                                        pattern.source()
                                     ),
                                 });
                             }
@@ -409,7 +413,7 @@ fn validate_container(
                             if code_line.is_empty() {
                                 continue;
                             }
-                            if !patterns.iter().any(|p| regex_matches(p, code_line)) {
+                            if !patterns.iter().any(|p| p.is_match(code_line)) {
                                 findings.push(Finding {
                                     kind: FindingKind::CodeblockLineMismatch,
                                     line: Some(*line),
@@ -598,10 +602,6 @@ fn check_occurrence(
             });
         }
     }
-}
-
-fn regex_matches(pattern: &str, text: &str) -> bool {
-    Regex::new(pattern).map(|re| re.is_match(text)).unwrap_or(false)
 }
 
 #[cfg(test)]
