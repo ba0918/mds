@@ -2,7 +2,8 @@
 
 use gray_matter::engine::YAML;
 use gray_matter::Matter;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 /// `$schema` の参照先。相対パスまたは URL。
@@ -25,19 +26,91 @@ pub enum ResolvedSchema {
 
 #[derive(Deserialize)]
 struct Frontmatter {
-    #[serde(rename = "$schema")]
-    schema: Option<String>,
+    #[serde(rename = "$schema", default, deserialize_with = "deserialize_schema")]
+    schema: SchemaValue,
+}
+
+/// `$schema` キーの値。キーの有無と null を区別する（R2 は null を誤りにする）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SchemaValue {
+    /// キーが無い。スキーマを持たない文書
+    Missing,
+    /// キーはあるが値が null（`$schema:` や `$schema: null`）
+    Null,
+    Value(String),
+}
+
+impl Default for SchemaValue {
+    fn default() -> Self {
+        SchemaValue::Missing
+    }
+}
+
+/// `$schema` の値が文字列であるか、null であるかを判別する。null とキー無しを
+/// 区別するため、`Option<String>` ではなくこの型で受ける。
+fn deserialize_schema<'de, D>(deserializer: D) -> Result<SchemaValue, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct Visitor;
+
+    impl<'de> serde::de::Visitor<'de> for Visitor {
+        type Value = SchemaValue;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a string or null for $schema")
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(SchemaValue::Null)
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(SchemaValue::Null)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(SchemaValue::Value(value.to_string()))
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(SchemaValue::Value(value))
+        }
+    }
+
+    // 数値・配列などは visit_* が無く型エラーになり、R2 の「文字列でない $schema」として扱う
+    deserializer.deserialize_any(Visitor)
 }
 
 /// 文書の frontmatter から `$schema` を読む。frontmatter が無ければスキーマなし。
-/// `$schema` 以外のキーは無視する。壊れた YAML や文字列でない `$schema` はエラー。
+/// `$schema` 以外のキーは無視する。壊れた YAML、null や文字列でない `$schema`、
+/// 空の `$schema` はエラー。
 pub fn frontmatter_schema(src: &str) -> Result<Option<SchemaRef>, FrontmatterError> {
     let matter = Matter::<YAML>::new();
     let result = matter
         .parse::<Frontmatter>(src)
         .map_err(|e| FrontmatterError(format!("{e}")))?;
     match result.data {
-        Some(frontmatter) => Ok(frontmatter.schema.map(classify)),
+        Some(frontmatter) => match frontmatter.schema {
+            SchemaValue::Missing => Ok(None),
+            SchemaValue::Null => Err(FrontmatterError("$schema is null".into())),
+            SchemaValue::Value(value) if value.is_empty() => {
+                Err(FrontmatterError("$schema is empty".into()))
+            }
+            SchemaValue::Value(value) => Ok(Some(classify(value))),
+        },
         None => Ok(None),
     }
 }
@@ -121,6 +194,24 @@ mod tests {
     #[test]
     fn non_string_schema_is_an_error() {
         let src = "---\n$schema: 42\n---\n# 題名\n";
+        assert!(frontmatter_schema(src).is_err());
+    }
+
+    #[test]
+    fn null_schema_is_an_error() {
+        let src = "---\n$schema:\n---\n# 題名\n";
+        assert!(frontmatter_schema(src).is_err());
+    }
+
+    #[test]
+    fn empty_string_schema_is_an_error() {
+        let src = "---\n$schema: \"\"\n---\n# 題名\n";
+        assert!(frontmatter_schema(src).is_err());
+    }
+
+    #[test]
+    fn array_schema_is_an_error() {
+        let src = "---\n$schema: [a, b]\n---\n# 題名\n";
         assert!(frontmatter_schema(src).is_err());
     }
 
