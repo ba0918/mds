@@ -48,10 +48,24 @@ fn ast_outputs_mdast_json_for_the_adr_fixture() {
 }
 
 #[test]
-fn ast_with_format_text_stops_with_exit_code_2() {
+fn ast_with_format_text_stops_with_argument_error() {
     let mut cmd = Command::cargo_bin("mds").unwrap();
     cmd.args(["ast", "fixtures/adr/0001.md", "--format", "text"]);
-    cmd.assert().code(2);
+    let output = cmd.output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("mds: argument_error:"), "stderr: {stderr}");
+}
+
+#[test]
+fn unknown_flag_stops_with_argument_error() {
+    let output = mds()
+        .args(["check", "fixtures/adr/0001.md", "--bogus"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("mds: argument_error:"), "stderr: {stderr}");
 }
 
 #[test]
@@ -243,6 +257,29 @@ fn check_broken_frontmatter_stops_with_frontmatter_invalid() {
 }
 
 #[test]
+fn values_with_broken_frontmatter_stops_with_frontmatter_invalid() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = write_file(dir.path(), "doc.md", "---\n$schema: [\n---\n# 題名\n");
+    let output = mds().args(["values", doc.to_str().unwrap()]).output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("frontmatter_invalid"));
+}
+
+#[test]
+fn ast_schema_with_broken_frontmatter_stops_with_frontmatter_invalid() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = write_file(dir.path(), "doc.md", "---\n$schema: [\n---\n# 題名\n");
+    let output = mds()
+        .args(["ast", doc.to_str().unwrap(), "--schema"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("frontmatter_invalid"));
+}
+
+#[test]
 fn values_text_defaults_to_indented_text() {
     let output = mds()
         .args(["values", "fixtures/adr/0001.md"])
@@ -365,6 +402,42 @@ fn check_directory_stops_on_invalid_schema() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("schema_invalid"));
+}
+
+#[test]
+fn check_directory_stops_on_frontmatter_invalid_and_outputs_no_findings() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(dir.path(), "schema.yaml", DIR_SCHEMA);
+    write_file(dir.path(), "good.md", good_doc());
+    write_file(dir.path(), "bad.md", "---\n$schema:\n---\n# T-1: 例\n\n## 補足\n\n本文。\n");
+    let output = mds()
+        .args(["check", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("frontmatter_invalid"));
+    assert!(output.stdout.is_empty(), "停止のときは指摘を出力しない");
+}
+
+#[test]
+fn check_directory_stops_on_schema_not_found_and_outputs_no_findings() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(dir.path(), "schema.yaml", DIR_SCHEMA);
+    write_file(dir.path(), "good.md", good_doc());
+    write_file(
+        dir.path(),
+        "bad.md",
+        "---\n$schema: ./missing.yaml\n---\n# T-1: 例\n\n## 補足\n\n本文。\n",
+    );
+    let output = mds()
+        .args(["check", dir.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("schema_not_found"));
+    assert!(output.stdout.is_empty(), "停止のときは指摘を出力しない");
 }
 
 #[test]
