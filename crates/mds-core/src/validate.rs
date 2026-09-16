@@ -735,4 +735,186 @@ document:
         assert!(!ks.contains(&FindingKind::UndeclaredLine));
         assert!(ks.contains(&FindingKind::MissingRequiredSection));
     }
+
+    // ---- R8〜R12: 行の規則 ----
+
+    #[test]
+    fn missing_required_field_is_found() {
+        let schema = "document:\n  preamble:\n    fields:\n      - name: 状態\n";
+        let doc = "# 題名\n\n## 状況\n\n本文。\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingRequiredField));
+    }
+
+    #[test]
+    fn field_pattern_mismatch_is_found() {
+        let schema = r#"
+document:
+  preamble:
+    fields:
+      - name: 日付
+        pattern: "^\\d{4}-\\d{2}-\\d{2}"
+"#;
+        let doc = "# 題名\n\n- 日付: yesterday\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::FieldPatternMismatch));
+    }
+
+    #[test]
+    fn field_enum_invalid_is_found() {
+        let schema = r#"
+document:
+  preamble:
+    fields:
+      - name: 状態
+        enum: [承認済み, 却下]
+"#;
+        let doc = "# 題名\n\n- 状態: 保留\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::FieldEnumInvalid));
+    }
+
+    #[test]
+    fn separator_splits_value_before_enum_check() {
+        let schema = r#"
+document:
+  preamble:
+    fields:
+      - name: タグ
+        separator: ","
+        enum: [a, b]
+"#;
+        let doc = "# 題名\n\n- タグ: a,c\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::FieldEnumInvalid));
+    }
+
+    #[test]
+    fn missing_statement_is_found() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement: {}\n";
+        let doc = "## 状況\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingStatement));
+    }
+
+    #[test]
+    fn statement_pattern_mismatch_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 状況
+      statement:
+        pattern: "^状況"
+"#;
+        let doc = "## 状況\n\n背景。\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::StatementPatternMismatch));
+    }
+
+    #[test]
+    fn statement_enum_invalid_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 状況
+      statement:
+        enum: [a, b]
+"#;
+        let doc = "## 状況\n\n本文。\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::StatementEnumInvalid));
+    }
+
+    #[test]
+    fn missing_bullets_is_found() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets: {}\n";
+        let doc = "## 理由\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingBullets));
+    }
+
+    #[test]
+    fn bullet_pattern_mismatch_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        pattern: "^理由"
+"#;
+        let doc = "## 理由\n\n- その他\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::BulletPatternMismatch));
+    }
+
+    #[test]
+    fn missing_table_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 用語集
+      table:
+        header: [用語, 意味]
+"#;
+        let doc = "## 用語集\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingTable));
+    }
+
+    #[test]
+    fn table_header_mismatch_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 用語集
+      table:
+        header: [用語, 意味]
+"#;
+        let doc = "## 用語集\n\n| 用語 |\n|---|\n| a |\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::TableHeaderMismatch));
+    }
+
+    #[test]
+    fn missing_codeblock_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 具体例
+      codeblock:
+        lang: gherkin
+"#;
+        let doc = "## 具体例\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingCodeblock));
+    }
+
+    #[test]
+    fn codeblock_lang_mismatch_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 具体例
+      codeblock:
+        lang: gherkin
+"#;
+        let doc = "## 具体例\n\n```python\nx = 1\n```\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::CodeblockLangMismatch));
+    }
+
+    #[test]
+    fn codeblock_line_mismatch_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 具体例
+      codeblock:
+        lang: gherkin
+        lines: ["^Scenario:", "^Given "]
+"#;
+        let doc = "## 具体例\n\n```gherkin\nScenario: 印を書く\nBad line\n```\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::CodeblockLineMismatch));
+    }
 }
