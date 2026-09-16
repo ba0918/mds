@@ -211,7 +211,7 @@ impl Repeat {
     fn validate(&self) -> Result<(), SchemaError> {
         if let (Some(min), Some(max)) = (self.min, self.max) {
             if min > max {
-                return Err(SchemaError("repeat の min が max より大きい".into()));
+                return Err(SchemaError("repeat min is greater than max".into()));
             }
         }
         Ok(())
@@ -232,7 +232,7 @@ impl When {
     fn validate(&self) -> Result<(), SchemaError> {
         let operators = self.eq.is_some() as u8 + self.ne.is_some() as u8;
         if operators != 1 {
-            return Err(SchemaError("when は eq か ne のどちらか一方を持つ".into()));
+            return Err(SchemaError("when must have exactly one of eq or ne".into()));
         }
         Ok(())
     }
