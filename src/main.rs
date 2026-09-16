@@ -174,21 +174,65 @@ fn load_schema_and_document(path: &Path, src: &str) -> Result<(Schema, Document)
     Ok((schema, document))
 }
 
-/// `$schema` の参照を解決してスキーマ YAML の文字列を読む。
+/// `$schema` の参照を解決してスキーマ YAML の文字列を読む。URL はキャッシュを優先する。
 fn load_schema_yaml(doc_path: &Path, schema_ref: &SchemaRef) -> Result<String, Stop> {
     match mds_core::frontmatter::resolve_schema(doc_path, schema_ref) {
         ResolvedSchema::File(path) => std::fs::read_to_string(&path).map_err(|e| Stop {
             kind: "schema_not_found",
             detail: format!("cannot read schema {}: {}", path.display(), e),
         }),
-        ResolvedSchema::Url(_url) => {
-            // Step 12 で URL 取得とキャッシュを実装する
-            Err(Stop {
-                kind: "schema_not_found",
-                detail: "cannot fetch a URL schema".into(),
-            })
+        ResolvedSchema::Url(url) => {
+            let cache = cache_path(&url);
+            if let Ok(content) = std::fs::read_to_string(&cache) {
+                return Ok(content);
+            }
+            let mut response = ureq::get(&url)
+                .call()
+                .map_err(|e| Stop {
+                    kind: "schema_not_found",
+                    detail: format!("cannot fetch schema {url}: {e}"),
+                })?;
+            let body = response
+                .body_mut()
+                .read_to_string()
+                .map_err(|e| Stop {
+                    kind: "schema_not_found",
+                    detail: format!("cannot read schema {url}: {e}"),
+                })?;
+            // キャッシュへの保存はベストエフォート。書けなくても取得した内容で進める
+            if let Some(parent) = cache.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&cache, &body);
+            Ok(body)
         }
     }
+}
+
+/// 基準のディレクトリから上に向かって、最初に見つかった `.mds/` のあるディレクトリを返す。
+/// 無ければカレントディレクトリ。
+fn base_dir() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let mut dir = cwd.as_path();
+    loop {
+        if dir.join(".mds").is_dir() {
+            return dir.to_path_buf();
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent,
+            None => return cwd,
+        }
+    }
+}
+
+/// URL スキーマのキャッシュファイルの置き場。基準のディレクトリの `.mds/cache/` に
+/// URL の SHA-256 の16進で置く。
+fn cache_path(url: &str) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(url.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    base_dir().join(".mds").join("cache").join(format!("{hash}.yaml"))
 }
 
 fn emit_check(files: &[(PathBuf, Vec<Finding>)], format: &str) -> Result<(), Stop> {
