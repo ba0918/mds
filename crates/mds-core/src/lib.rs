@@ -2,4 +2,7 @@
 
 pub mod ast;
 pub mod frontmatter;
+pub mod document;
+pub mod finding;
 pub mod schema;
+pub mod validate;
