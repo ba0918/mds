@@ -1,3 +1,4 @@
 //! スキーマ言語・検証・抽出のコア。CLI のフレームワークには依存しない。
 
 pub mod ast;
+pub mod frontmatter;

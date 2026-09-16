@@ -1,0 +1,147 @@
+//! frontmatter から `$schema` を読み、参照先を解決する。
+
+use gray_matter::engine::YAML;
+use gray_matter::Matter;
+use serde::Deserialize;
+use std::path::{Component, Path, PathBuf};
+
+/// `$schema` の参照先。相対パスまたは URL。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchemaRef {
+    Relative(String),
+    Url(String),
+}
+
+/// frontmatter を読めなかった理由。R19 の `frontmatter_invalid` に相当する。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterError(pub String);
+
+/// 解決済みのスキーマの位置。ファイル読み書きは CLI 側の責務なので、ここでは位置だけを決める。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedSchema {
+    File(PathBuf),
+    Url(String),
+}
+
+#[derive(Deserialize)]
+struct Frontmatter {
+    #[serde(rename = "$schema")]
+    schema: Option<String>,
+}
+
+/// 文書の frontmatter から `$schema` を読む。frontmatter が無ければスキーマなし。
+/// `$schema` 以外のキーは無視する。壊れた YAML や文字列でない `$schema` はエラー。
+pub fn frontmatter_schema(src: &str) -> Result<Option<SchemaRef>, FrontmatterError> {
+    let matter = Matter::<YAML>::new();
+    let result = matter
+        .parse::<Frontmatter>(src)
+        .map_err(|e| FrontmatterError(format!("{e}")))?;
+    match result.data {
+        Some(frontmatter) => Ok(frontmatter.schema.map(classify)),
+        None => Ok(None),
+    }
+}
+
+/// `$schema` の参照を、文書の位置を基準に解決する。
+pub fn resolve_schema(doc_path: &Path, schema_ref: &SchemaRef) -> ResolvedSchema {
+    match schema_ref {
+        SchemaRef::Url(url) => ResolvedSchema::Url(url.clone()),
+        SchemaRef::Relative(rel) => {
+            let base = doc_path.parent().unwrap_or_else(|| Path::new("."));
+            ResolvedSchema::File(normalize(&base.join(rel)))
+        }
+    }
+}
+
+/// `..` と `.` を字句的に畳む。ファイルシステムには触れない。
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if out.as_os_str().is_empty() {
+                    out.push("..");
+                } else {
+                    out.pop();
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+fn classify(schema: String) -> SchemaRef {
+    if schema.starts_with("http://") || schema.starts_with("https://") {
+        SchemaRef::Url(schema)
+    } else {
+        SchemaRef::Relative(schema)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn adr() -> &'static str {
+        "---\n$schema: ../.mds/schemas/adr.yaml\ntitle: 例\n---\n# 題名\n"
+    }
+
+    #[test]
+    fn reads_relative_schema_ref_and_ignores_other_keys() {
+        let ref_ = frontmatter_schema(adr()).unwrap().unwrap();
+        assert_eq!(ref_, SchemaRef::Relative("../.mds/schemas/adr.yaml".into()));
+    }
+
+    #[test]
+    fn reads_url_schema_ref() {
+        let src = "---\n$schema: https://example.com/schema.yaml\n---\n# 題名\n";
+        let ref_ = frontmatter_schema(src).unwrap().unwrap();
+        assert_eq!(ref_, SchemaRef::Url("https://example.com/schema.yaml".into()));
+    }
+
+    #[test]
+    fn document_without_frontmatter_has_no_schema() {
+        assert_eq!(frontmatter_schema("# 題名\n").unwrap(), None);
+    }
+
+    #[test]
+    fn frontmatter_without_schema_key_has_no_schema() {
+        let src = "---\ntitle: 例\n---\n# 題名\n";
+        assert_eq!(frontmatter_schema(src).unwrap(), None);
+    }
+
+    #[test]
+    fn broken_frontmatter_is_an_error() {
+        let src = "---\n$schema: [\n---\n# 題名\n";
+        assert!(frontmatter_schema(src).is_err());
+    }
+
+    #[test]
+    fn non_string_schema_is_an_error() {
+        let src = "---\n$schema: 42\n---\n# 題名\n";
+        assert!(frontmatter_schema(src).is_err());
+    }
+
+    #[test]
+    fn relative_ref_resolves_against_document_location() {
+        let doc = std::path::Path::new("fixtures/adr/0001.md");
+        let ref_ = SchemaRef::Relative("../.mds/schemas/adr.yaml".into());
+        let resolved = resolve_schema(doc, &ref_);
+        assert_eq!(
+            resolved,
+            ResolvedSchema::File(std::path::PathBuf::from("fixtures/.mds/schemas/adr.yaml"))
+        );
+    }
+
+    #[test]
+    fn url_ref_stays_a_url() {
+        let doc = std::path::Path::new("fixtures/adr/0001.md");
+        let ref_ = SchemaRef::Url("https://example.com/schema.yaml".into());
+        assert_eq!(
+            resolve_schema(doc, &ref_),
+            ResolvedSchema::Url("https://example.com/schema.yaml".into())
+        );
+    }
+}
