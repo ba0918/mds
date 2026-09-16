@@ -179,16 +179,8 @@ fn load_schema_and_document(path: &Path, src: &str) -> Result<(Schema, Document)
 const MAX_SCHEMA_BYTES: u64 = 4 * 1024 * 1024;
 
 /// URL スキーマの取得全体のタイムアウト。応答しないサーバに無期限で
-/// ブロックしないための既定値。テストでは MDS_SCHEMA_TIMEOUT_MS で短縮する。
-const SCHEMA_FETCH_TIMEOUT_MS: u64 = 10_000;
-
-fn schema_fetch_timeout() -> Duration {
-    let ms = std::env::var("MDS_SCHEMA_TIMEOUT_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(SCHEMA_FETCH_TIMEOUT_MS);
-    Duration::from_millis(ms)
-}
+/// ブロックしないための既定値。
+const SCHEMA_FETCH_TIMEOUT: Duration = Duration::from_millis(10_000);
 
 /// `$schema` の参照を解決してスキーマ YAML の文字列を読む。URL はキャッシュを優先する。
 fn load_schema_yaml(doc_path: &Path, schema_ref: &SchemaRef) -> Result<String, Stop> {
@@ -204,7 +196,7 @@ fn load_schema_yaml(doc_path: &Path, schema_ref: &SchemaRef) -> Result<String, S
             }
             let mut response = ureq::get(&url)
                 .config()
-                .timeout_global(Some(schema_fetch_timeout()))
+                .timeout_global(Some(SCHEMA_FETCH_TIMEOUT))
                 .build()
                 .call()
                 .map_err(|e| Stop {

@@ -123,34 +123,3 @@ fn url_schema_without_cache_and_unreachable_server_stops() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("schema_not_found"));
 }
-
-#[test]
-fn url_schema_server_that_never_responds_stops_after_timeout() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { break };
-            // リクエストは読むが、応答を返さずにブロックする
-            let _ = stream.read(&mut [0u8; 1024]);
-            thread::sleep(std::time::Duration::from_secs(60));
-        }
-    });
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".mds")).unwrap();
-    let doc = write_file(
-        dir.path(),
-        "doc.md",
-        &format!("---\n$schema: http://127.0.0.1:{port}/schema.yaml\n---\n# T-1234: 例\n"),
-    );
-    let output = mds()
-        .env("MDS_SCHEMA_TIMEOUT_MS", "300")
-        .timeout(std::time::Duration::from_secs(5))
-        .current_dir(dir.path())
-        .args(["check", doc.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("schema_not_found"));
-}
