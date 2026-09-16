@@ -203,8 +203,9 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
 /// 項目は箇条書きの対象外で、閉じた世界では undeclared_line になる（R10）。
 /// 入れ子のリストは各項目をトップレベルの箇条書きとして扱う。コードブロック・
 /// 表などの子はブロックとして残し、閉じた世界の undeclared_line の対象にする。
-/// コードブロック・表が先頭のときも箇条書きの lead を作らず、ブロックとして
-/// 残す（継続段落を吸わない）。
+/// 先頭がコードブロック・表などで lead の段落が無いとき、後続の段落は文として
+/// 扱う（R10）。文の出現回数・規則（R9）の対象になり、閉じた世界では
+/// undeclared_line になる。
 fn blocks_from_list_item(
     item: &markdown::mdast::ListItem,
     src: &str,
@@ -222,8 +223,16 @@ fn blocks_from_list_item(
                 let text = raw_slice(src, child);
                 if i == 0 {
                     lead_text = Some(text);
-                } else {
+                } else if lead_text.is_some() {
                     continuation.push(text);
+                } else {
+                    // lead が無い項目（先頭がコードブロック・表など）の段落は
+                    // 文として扱う。継続段落は lead に付く場合だけだから、この
+                    // 段落はどこにも吸われない（R10）。
+                    extra.push(Block::Statement {
+                        text,
+                        line: start_line(child),
+                    });
                 }
             }
             Node::List(l) => {
@@ -235,8 +244,7 @@ fn blocks_from_list_item(
             }
             // コードブロック・表などのブロックは捨てず、ブロックとして残す。
             // 引用・水平線などは blocks_from_node が Block::Other にして閉じた
-            // 世界でも無視される（R13）。lead が無い項目の段落は継続段落のまま
-            // どこにも付かず、R10 のとおり文にも数えない。
+            // 世界でも無視される（R13）。
             other => extra.extend(blocks_from_node(other, src)),
         }
     }

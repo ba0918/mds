@@ -802,6 +802,54 @@ document:
     }
 
     #[test]
+    fn paragraph_after_code_block_lead_is_undeclared_line_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 0 }\n      codeblock:\n        required: false\n        lang: python\n";
+        let doc = "## 理由\n\n- ```python\n  x = 1\n  ```\n\n  後続の段落\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "先頭がコードブロックのリスト項目の後続段落は undeclared_line になる: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn paragraph_after_table_lead_is_undeclared_line_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      table:\n        required: false\n        header: [a, b]\n      bullets:\n        repeat: { min: 0 }\n";
+        let doc = "## 理由\n\n- | a | b |\n  |---|---|\n  | 1 | 2 |\n\n  後続の段落\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "先頭が表のリスト項目の後続段落は undeclared_line になる: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn paragraph_after_code_block_lead_counts_as_a_statement() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: true\n      codeblock:\n        required: false\n        lang: python\n      bullets:\n        repeat: { min: 0 }\n";
+        let doc = "## 状況\n\n- ```python\n  x = 1\n  ```\n\n  後続の段落\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::MissingStatement),
+            "先頭がコードブロックのリスト項目の後続段落は文として数える: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn paragraph_after_code_block_lead_is_subject_to_statement_pattern() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        pattern: \"^状況\"\n      codeblock:\n        required: false\n        lang: python\n      bullets:\n        repeat: { min: 0 }\n";
+        let doc = "## 状況\n\n- ```python\n  x = 1\n  ```\n\n  後続の段落\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::StatementPatternMismatch),
+            "先頭がコードブロックのリスト項目の後続段落に文の pattern を適用する: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
     fn nested_list_items_are_each_a_top_level_bullet() {
         let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 2 }\n";
         let doc = "## 理由\n\n- 親\n  - 子\n";

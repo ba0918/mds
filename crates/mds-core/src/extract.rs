@@ -611,6 +611,29 @@ document:
     }
 
     #[test]
+    fn paragraph_after_code_block_lead_is_extracted_as_a_statement() {
+        let schema = r#"
+document:
+  sections:
+    - name: 状況
+      statement:
+        required: false
+        extract: note
+      codeblock:
+        required: false
+        lang: python
+      bullets:
+        repeat: { min: 0 }
+"#;
+        let doc = "## 状況\n\n- ```python\n  x = 1\n  ```\n\n  後続の段落\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["note"], "後続の段落",
+            "先頭がコードブロックのリスト項目の後続段落は文として抽出する"
+        );
+    }
+
+    #[test]
     fn section_body_includes_statements_and_bullets_only() {
         let schema = r#"
 document:
