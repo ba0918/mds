@@ -2,3 +2,4 @@
 
 pub mod ast;
 pub mod frontmatter;
+pub mod schema;

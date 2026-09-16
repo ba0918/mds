@@ -9,3 +9,5 @@ markdown = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 gray_matter = { version = "0.3", features = ["yaml"] }
+regex = "1"
+serde-saphyr = "1"
