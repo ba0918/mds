@@ -386,7 +386,10 @@ fn render_text(value: &Value, out: &mut String, indent: usize) {
                     }
                     Value::String(s) => {
                         push_indent(out, indent);
-                        out.push_str(&format!("{key}: {s}\n"));
+                        out.push_str(key);
+                        out.push_str(": ");
+                        push_string(out, indent + 2, s);
+                        out.push('\n');
                     }
                     other => {
                         push_indent(out, indent);
@@ -405,7 +408,9 @@ fn render_text(value: &Value, out: &mut String, indent: usize) {
                     }
                     Value::String(s) => {
                         push_indent(out, indent);
-                        out.push_str(&format!("{}. {s}\n", i + 1));
+                        out.push_str(&format!("{}. ", i + 1));
+                        push_string(out, indent + 2, s);
+                        out.push('\n');
                     }
                     other => {
                         push_indent(out, indent);
@@ -421,6 +426,18 @@ fn render_text(value: &Value, out: &mut String, indent: usize) {
 fn push_indent(out: &mut String, indent: usize) {
     for _ in 0..indent {
         out.push(' ');
+    }
+}
+
+/// 値の文字列を出力する。改行を含む値は続きの行をインデントし、1件の値として
+/// 読めるようにする。末尾の改行は表示の邪魔なので落とす（json の値は変えない）。
+fn push_string(out: &mut String, indent: usize, s: &str) {
+    for (i, line) in s.trim_end_matches('\n').split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+            push_indent(out, indent);
+        }
+        out.push_str(line);
     }
 }
 
