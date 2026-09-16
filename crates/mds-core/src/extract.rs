@@ -594,6 +594,23 @@ document:
     }
 
     #[test]
+    fn section_body_includes_continuation_paragraphs_and_nested_bullets() {
+        let schema = r#"
+document:
+  sections:
+    - name: 状況
+      extract: sections.body
+      statement:
+        required: false
+      bullets:
+        repeat: { min: 0 }
+"#;
+        let doc = "## 状況\n\n- 理由1\n\n  続きの段落\n  - 入れ子\n";
+        let v = values(schema, doc);
+        assert_eq!(v["sections"]["body"], "- 理由1\n\n続きの段落\n\n- 入れ子");
+    }
+
+    #[test]
     fn item_extract_is_heading_plus_body() {
         let schema = r#"
 document:

@@ -152,18 +152,33 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
             let mut out = Vec::new();
             for child in &list.children {
                 if let Node::ListItem(item) = child {
-                    let text = first_block_text(&item.children, src);
                     let item_line = start_line(child);
-                    match split_field(&text) {
-                        Some((name, value)) => out.push(Block::Field {
-                            name,
-                            value,
-                            line: item_line,
-                        }),
-                        None => out.push(Block::Bullet {
-                            text,
-                            line: item_line,
-                        }),
+                    // 最初のブロックが項目の本文で、フィールド行か箇条書きかを決める。
+                    // 2つ目以降のブロック（継続段落・入れ子リスト）は捨てずに
+                    // 文や箇条書きとして分類する。閉じた世界の対象に含めるため。
+                    let mut children = item.children.iter();
+                    if let Some(first) = children.next() {
+                        let text = raw_slice(src, first);
+                        match split_field(&text) {
+                            Some((name, value)) => out.push(Block::Field {
+                                name,
+                                value,
+                                line: item_line,
+                            }),
+                            None => out.push(Block::Bullet {
+                                text,
+                                line: item_line,
+                            }),
+                        }
+                    }
+                    for rest in children {
+                        match rest {
+                            Node::Paragraph(_) => out.push(Block::Statement {
+                                text: raw_slice(src, rest),
+                                line: start_line(rest),
+                            }),
+                            other => out.extend(blocks_from_node(other, src)),
+                        }
                     }
                 }
             }
@@ -192,23 +207,6 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
         }],
         _ => vec![Block::Other { line }],
     }
-}
-
-/// リスト項目の最初のブロックの生テキスト（`- ` を除いた本文）を返す。
-fn first_block_text(children: &[Node], src: &str) -> String {
-    for child in children {
-        if matches!(
-            child,
-            Node::Paragraph(_)
-                | Node::Heading(_)
-                | Node::List(_)
-                | Node::Code(_)
-                | Node::Table(_)
-        ) {
-            return raw_slice(src, child);
-        }
-    }
-    String::new()
 }
 
 /// `- 名前: 値` の形なら名前と値に分ける。形でなければ None。

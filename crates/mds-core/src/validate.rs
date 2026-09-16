@@ -677,6 +677,26 @@ document:
     }
 
     #[test]
+    fn continuation_paragraph_in_a_list_item_is_reported_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 0 }\n";
+        let doc = "## 理由\n\n- 親\n\n  続きの段落\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::UndeclaredLine));
+    }
+
+    #[test]
+    fn nested_list_items_are_each_reported_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 理由\n";
+        let doc = "## 理由\n\n- 親\n  - 子\n";
+        let findings = validate_src(schema, doc, false);
+        let undeclared = findings
+            .iter()
+            .filter(|f| f.kind == FindingKind::UndeclaredLine)
+            .count();
+        assert_eq!(undeclared, 2);
+    }
+
+    #[test]
     fn missing_required_section_is_found() {
         let doc = "# ADR-0001: a\n\n- 状態: 承認済み\n\n## 状況\n\n背景。\n";
         let findings = validate_src(SCHEMA, doc, false);
