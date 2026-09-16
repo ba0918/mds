@@ -49,6 +49,8 @@ pub enum Block {
     Field {
         name: String,
         value: String,
+        /// フィールド行の子である継続段落。R8 ではフィールド行の一部として扱う
+        continuation: Vec<String>,
         line: usize,
     },
     Bullet {
@@ -240,6 +242,7 @@ fn blocks_from_list_item(
             Some((name, value)) => out.push(Block::Field {
                 name,
                 value,
+                continuation,
                 line: item_line,
             }),
             None => out.push(Block::Bullet {
@@ -290,11 +293,33 @@ impl Block {
             return String::new();
         };
         let mut out = format!("- {text}");
-        if !continuation.is_empty() {
-            out.push('\n');
-            out.push_str(&continuation.join("\n\n"));
-        }
+        join_continuation(&mut out, continuation);
         out
+    }
+
+    /// フィールド行の抽出要素。`- 名前: 値` の行と継続段落を改行でつなぐ。
+    /// 継続段落が複数のときは継続段落どうしを空行でつなぐ（R8・R16）。
+    pub fn field_element(&self) -> String {
+        let Block::Field {
+            name,
+            value,
+            continuation,
+            ..
+        } = self
+        else {
+            return String::new();
+        };
+        let mut out = format!("- {name}: {value}");
+        join_continuation(&mut out, continuation);
+        out
+    }
+}
+
+/// 継続段落を `- ` 行に改行で続けてつなぐ。複数あるときは空行でつなぐ（R10）。
+fn join_continuation(out: &mut String, continuation: &[String]) {
+    if !continuation.is_empty() {
+        out.push('\n');
+        out.push_str(&continuation.join("\n\n"));
     }
 }
 

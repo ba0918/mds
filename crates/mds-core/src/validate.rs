@@ -297,7 +297,7 @@ fn validate_container(
 
     for block in blocks {
         match block {
-            Block::Field { name, value, line } => {
+            Block::Field { name, value, line, .. } => {
                 match rules.fields.iter().position(|f| f.name == *name) {
                     Some(idx) => {
                         *field_counts.entry(name.as_str()).or_insert(0) += 1;
@@ -783,6 +783,18 @@ document:
         let doc = "## 理由\n\n1. 順序付き\n";
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::MissingBullets));
+    }
+
+    #[test]
+    fn field_continuation_is_part_of_the_field_not_undeclared_or_statement() {
+        let schema = "document:\n  preamble:\n    fields:\n      - name: 状態\n    statement:\n      required: true\n";
+        let doc = "# 題名\n\n- 状態: 承認済み\n\n  継続の段落\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingStatement));
+        assert!(
+            !kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "継続段落はフィールド行の一部で undeclared_line にしない（R8）"
+        );
     }
 
     #[test]

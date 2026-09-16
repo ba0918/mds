@@ -144,19 +144,26 @@ fn extract_fields(fields: &[Field], blocks: &[&Block], root: &mut Map<String, Va
 }
 
 fn field_single(field: &Field, block: &Block) -> Value {
-    let value = match block {
-        Block::Field { value, .. } => value.as_str(),
-        _ => "",
+    let (value, continuation) = match block {
+        Block::Field { value, continuation, .. } => (value.as_str(), continuation.as_slice()),
+        _ => ("", &[][..]),
+    };
+    // 継続段落はフィールド行の一部で、値と改行でつなぐ（R8・R16）。複数あるときは
+    // 箇条書きと同じく空行でつなぐ（R10）
+    let full = if continuation.is_empty() {
+        value.to_string()
+    } else {
+        format!("{value}\n{}", continuation.join("\n\n"))
     };
     match field.effective_separator() {
         // 区切った要素は前後の空白を取り除いて抽出し、空の要素は空文字列として残す（R8）
         Some(sep) => Value::Array(
-            value
+            full
                 .split(sep)
                 .map(|s| Value::String(s.trim().to_string()))
                 .collect(),
         ),
-        None => Value::String(value.to_string()),
+        None => Value::String(full),
     }
 }
 
@@ -327,9 +334,7 @@ fn body_from_blocks(blocks: &[Block], include_fields: bool) -> String {
         let (text, is_statement): (String, bool) = match block {
             Block::Statement { text, .. } => (text.clone(), true),
             Block::Bullet { .. } => (block.bullet_element(), false),
-            Block::Field { name, value, .. } if include_fields => {
-                (format!("- {name}: {value}"), false)
-            }
+            Block::Field { .. } if include_fields => (block.field_element(), false),
             _ => continue,
         };
         if !out.is_empty() {
@@ -693,6 +698,44 @@ document:
             json!(["- 箇条書き"]),
             "順序付きリストは箇条書きの対象外で抽出に含めない（R10）"
         );
+    }
+
+    #[test]
+    fn field_extract_includes_continuation_paragraph() {
+        let schema = r#"
+document:
+  preamble:
+    fields:
+      - name: 状態
+        extract: status
+"#;
+        let doc = "# 題名\n\n- 状態: 承認済み\n\n  継続の段落\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["status"],
+            "承認済み\n継続の段落",
+            "フィールド行の継続段落は値に改行でつなぐ（R8・R16）"
+        );
+    }
+
+    #[test]
+    fn item_body_field_line_includes_continuation_paragraph() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        repeat: { min: 0 }
+        extract: items
+        fields:
+          - name: 種類
+        statement:
+          required: false
+"#;
+        let doc = "## 要求\n\n### REQ-001: 名前\n\n- 種類: algorithm\n\n  継続の説明\n";
+        let v = values(schema, doc);
+        // 継続段落はフィールド行の一部なので、項目の本文のフィールド行にも含める（R8・R16）
+        assert_eq!(v["items"], json!(["REQ-001: 名前\n- 種類: algorithm\n継続の説明"]));
     }
 
     #[test]
