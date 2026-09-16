@@ -142,7 +142,13 @@ fn validate_items(section: &Section, items: &[Item], findings: &mut Vec<Finding>
     };
 
     for item in items {
-        if let Some(id_pattern) = &item_rule.id {
+        if !item.has_id_separator {
+            findings.push(Finding {
+                kind: FindingKind::InvalidId,
+                line: Some(item.line),
+                detail: format!("item heading \"{}\" has no \":\" separator", item.id),
+            });
+        } else if let Some(id_pattern) = &item_rule.id {
             if !id_pattern.is_match(&item.id) {
                 findings.push(Finding {
                     kind: FindingKind::InvalidId,
@@ -160,7 +166,7 @@ fn validate_items(section: &Section, items: &[Item], findings: &mut Vec<Finding>
     }
 
     let count = items.len() as u64;
-    let (min, max) = item_bounds(item_rule.repeat.as_ref());
+    let (min, max) = item_bounds(item_rule.required, item_rule.repeat.as_ref());
     check_occurrence(
         count,
         min,
@@ -288,9 +294,10 @@ fn validate_container(
                         ordered_seen.push((idx, *line));
                         let field = &rules.fields[idx];
                         if when_allows(field.when.as_ref(), blocks) {
-                            let values: Vec<&str> = match field.effective_separator() {
-                                Some(sep) => value.split(sep).collect(),
-                                None => vec![value.as_str()],
+                            // 区切った要素は前後の空白を取り除いてから照合する（R8）
+                            let values: Vec<String> = match field.effective_separator() {
+                                Some(sep) => split_trimmed(value, sep),
+                                None => vec![value.clone()],
                             };
                             for v in &values {
                                 if let Some(pattern) = &field.pattern {
@@ -552,6 +559,12 @@ fn validate_container(
     }
 }
 
+/// `separator` で分けた要素を、前後の空白を取り除いて返す。空の要素は
+/// 空文字列として残す（R8）。
+fn split_trimmed(value: &str, sep: &str) -> Vec<String> {
+    value.split(sep).map(|s| s.trim().to_string()).collect()
+}
+
 /// `when` の条件を評価する。参照フィールドが無いとき eq は偽、ne は真。
 fn when_allows(when: Option<&When>, blocks: &[Block]) -> bool {
     let Some(when) = when else {
@@ -581,9 +594,10 @@ fn bounds(required: Option<bool>, repeat: Option<&Repeat>) -> (u64, Option<u64>)
     }
 }
 
-fn item_bounds(repeat: Option<&Repeat>) -> (u64, Option<u64>) {
+fn item_bounds(required: Option<bool>, repeat: Option<&Repeat>) -> (u64, Option<u64>) {
     match repeat {
         Some(repeat) => (repeat.min.unwrap_or(0), repeat.max),
+        None if required == Some(false) => (0, Some(1)),
         None => (1, Some(1)),
     }
 }
@@ -915,6 +929,21 @@ document:
     }
 
     #[test]
+    fn separator_elements_are_trimmed_before_enum_check() {
+        let schema = r#"
+document:
+  preamble:
+    fields:
+      - name: タグ
+        separator: ","
+        enum: [a, b, c]
+"#;
+        let doc = "# 題名\n\n- タグ: a, c\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(!kinds(&findings).contains(&FindingKind::FieldEnumInvalid));
+    }
+
+    #[test]
     fn missing_statement_is_found() {
         let schema = "document:\n  sections:\n    - name: 状況\n      statement: {}\n";
         let doc = "## 状況\n";
@@ -1132,6 +1161,39 @@ document:
         let doc = "## 要求\n\n### REQ-001: a\n\n本文。\n\n### REQ-002: b\n\n本文。\n";
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::RepeatMaxExceeded));
+    }
+
+    #[test]
+    fn item_with_required_false_is_optional() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        id: "REQ-\\d{3,}"
+        required: false
+        statement:
+          required: false
+"#;
+        let doc = "## 要求\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(!kinds(&findings).contains(&FindingKind::RepeatMinNotMet));
+        assert!(!kinds(&findings).contains(&FindingKind::MissingRequiredSection));
+    }
+
+    #[test]
+    fn item_heading_without_colon_is_invalid_id() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        statement:
+          required: false
+"#;
+        let doc = "## 要求\n\n### REQ-001\n\n本文。\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::InvalidId));
     }
 
     #[test]

@@ -121,6 +121,7 @@ pub struct Item {
     pub ordered: bool,
     pub statement: Option<Statement>,
     pub bullets: Option<Bullets>,
+    pub required: Option<bool>,
     pub repeat: Option<Repeat>,
     pub extract: Option<Extract>,
 }
@@ -299,6 +300,23 @@ fn validate_section(section: &Section) -> Result<(), SchemaError> {
 fn validate_item(item: &Item) -> Result<(), SchemaError> {
     if let Some(repeat) = &item.repeat {
         repeat.validate()?;
+    }
+    // 項目の内部のフィールド行・文・箇条書きには extract を宣言できない（R16）
+    if let Some(field) = item.fields.iter().find(|f| f.extract.is_some()) {
+        return Err(SchemaError(format!(
+            "item field \"{}\" cannot declare extract",
+            field.name
+        )));
+    }
+    if let Some(statement) = &item.statement {
+        if statement.extract.is_some() {
+            return Err(SchemaError("item statement cannot declare extract".into()));
+        }
+    }
+    if let Some(bullets) = &item.bullets {
+        if bullets.extract.is_some() {
+            return Err(SchemaError("item bullets cannot declare extract".into()));
+        }
     }
     validate_fields(&item.fields)?;
     validate_statement(item.statement.as_ref())?;
@@ -509,6 +527,20 @@ document:
     #[test]
     fn invalid_item_id_regex_is_an_error() {
         let yaml = "document:\n  sections:\n    - name: x\n      item:\n        id: \"(\"\n";
+        assert!(parse_schema(yaml).is_err());
+    }
+
+    #[test]
+    fn item_internal_extract_is_schema_invalid() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        fields:
+          - name: 種類
+            extract: kind
+"#;
         assert!(parse_schema(yaml).is_err());
     }
 

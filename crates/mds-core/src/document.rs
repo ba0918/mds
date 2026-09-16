@@ -37,6 +37,8 @@ pub struct Item {
     pub id: String,
     /// 見出しの ID より後
     pub title: String,
+    /// 見出しに `:` があるか。無いときは invalid_id の対象（R7）
+    pub has_id_separator: bool,
     pub line: usize,
     pub blocks: Vec<Block>,
 }
@@ -108,10 +110,11 @@ impl Document {
                     3 => match current_section {
                         Some(sec_idx) => {
                             let section = &mut doc.sections[sec_idx];
-                            let (id, title) = split_item_heading(&text);
+                            let (id, title, has_id_separator) = split_item_heading(&text);
                             section.items.push(Item {
                                 id,
                                 title,
+                                has_id_separator,
                                 line,
                                 blocks: Vec::new(),
                             });
@@ -259,14 +262,16 @@ impl Block {
     }
 }
 
-/// 項目見出しを ID と題名に分ける。`:` が無ければ全体を ID にする。
-fn split_item_heading(text: &str) -> (String, String) {
+/// 項目見出しを ID と題名に分ける。`:` が無ければ全体を ID にし、区切りが
+/// 無いことを返す（R7 の invalid_id の判定に使う）。
+fn split_item_heading(text: &str) -> (String, String, bool) {
     match text.find(':') {
         Some(idx) => (
             text[..idx].trim().to_string(),
             text[idx + 1..].trim().to_string(),
+            true,
         ),
-        None => (text.trim().to_string(), String::new()),
+        None => (text.trim().to_string(), String::new(), false),
     }
 }
 
