@@ -746,6 +746,38 @@ document:
     }
 
     #[test]
+    fn code_block_child_of_list_item_is_undeclared_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 理由\n";
+        let doc = "## 理由\n\n- 親\n\n  ```\n  x = 1\n  ```\n";
+        let findings = validate_src(schema, doc, false);
+        let details: Vec<&str> = findings
+            .iter()
+            .filter(|f| f.kind == FindingKind::UndeclaredLine)
+            .map(|f| f.detail.as_str())
+            .collect();
+        assert!(
+            details.contains(&"undeclared code block"),
+            "リスト項目の中のコードブロックが undeclared_line になる: {details:?}"
+        );
+    }
+
+    #[test]
+    fn table_child_of_list_item_is_undeclared_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 理由\n";
+        let doc = "## 理由\n\n- 親\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n";
+        let findings = validate_src(schema, doc, false);
+        let details: Vec<&str> = findings
+            .iter()
+            .filter(|f| f.kind == FindingKind::UndeclaredLine)
+            .map(|f| f.detail.as_str())
+            .collect();
+        assert!(
+            details.contains(&"undeclared table"),
+            "リスト項目の中の表が undeclared_line になる: {details:?}"
+        );
+    }
+
+    #[test]
     fn nested_list_items_are_each_a_top_level_bullet() {
         let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 2 }\n";
         let doc = "## 理由\n\n- 親\n  - 子\n";

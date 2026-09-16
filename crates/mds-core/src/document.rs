@@ -201,7 +201,8 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
 /// リスト項目を1つ以上のブロックにする。先頭の段落がフィールド行か箇条書きかを
 /// 決め、続く段落（継続段落）は箇条書きの一部にする（R10）。順序付きリストの
 /// 項目は箇条書きの対象外で、閉じた世界では undeclared_line になる（R10）。
-/// 入れ子のリストは各項目をトップレベルの箇条書きとして扱う。
+/// 入れ子のリストは各項目をトップレベルの箇条書きとして扱う。コードブロック・
+/// 表などの子はブロックとして残し、閉じた世界の undeclared_line の対象にする。
 fn blocks_from_list_item(
     item: &markdown::mdast::ListItem,
     src: &str,
@@ -214,19 +215,21 @@ fn blocks_from_list_item(
     };
     let text = raw_slice(src, first);
     let mut continuation: Vec<String> = Vec::new();
-    let mut nested: Vec<Block> = Vec::new();
+    let mut extra: Vec<Block> = Vec::new();
     for rest in children {
         match rest {
             Node::Paragraph(p) => continuation.push(slice_at(src, p.position.as_ref())),
             Node::List(l) => {
                 for child in &l.children {
                     if let Node::ListItem(ni) = child {
-                        nested.extend(blocks_from_list_item(ni, src, l.ordered));
+                        extra.extend(blocks_from_list_item(ni, src, l.ordered));
                     }
                 }
             }
-            // その他のブロック（引用など）は捨てる
-            _ => {}
+            // コードブロック・表などのブロックは捨てず、ブロックとして残す。
+            // 引用・水平線などは blocks_from_node が Block::Other にして閉じた
+            // 世界でも無視される（R13）。
+            other => extra.extend(blocks_from_node(other, src)),
         }
     }
     let mut out = Vec::new();
@@ -252,7 +255,7 @@ fn blocks_from_list_item(
             }),
         }
     }
-    out.extend(nested);
+    out.extend(extra);
     out
 }
 
