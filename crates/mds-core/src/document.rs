@@ -57,6 +57,13 @@ pub enum Block {
         continuation: Vec<String>,
         line: usize,
     },
+    /// 順序付きリストの項目（`1. ` など）。箇条書きの対象外（R10）。
+    /// 閉じた世界では undeclared_line になる。抽出では値に含めない。
+    OrderedList {
+        text: String,
+        continuation: Vec<String>,
+        line: usize,
+    },
     Statement {
         text: String,
         line: usize,
@@ -159,7 +166,7 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
             let mut out = Vec::new();
             for child in &list.children {
                 if let Node::ListItem(item) = child {
-                    out.extend(blocks_from_list_item(item, src));
+                    out.extend(blocks_from_list_item(item, src, list.ordered));
                 }
             }
             out
@@ -190,9 +197,14 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
 }
 
 /// リスト項目を1つ以上のブロックにする。先頭の段落がフィールド行か箇条書きかを
-/// 決め、続く段落（継続段落）は箇条書きの一部にする（R10）。入れ子のリストは
-/// 各項目をトップレベルの箇条書きとして扱う。
-fn blocks_from_list_item(item: &markdown::mdast::ListItem, src: &str) -> Vec<Block> {
+/// 決め、続く段落（継続段落）は箇条書きの一部にする（R10）。順序付きリストの
+/// 項目は箇条書きの対象外で、閉じた世界では undeclared_line になる（R10）。
+/// 入れ子のリストは各項目をトップレベルの箇条書きとして扱う。
+fn blocks_from_list_item(
+    item: &markdown::mdast::ListItem,
+    src: &str,
+    ordered: bool,
+) -> Vec<Block> {
     let item_line = line_at(item.position.as_ref());
     let mut children = item.children.iter();
     let Some(first) = children.next() else {
@@ -207,26 +219,35 @@ fn blocks_from_list_item(item: &markdown::mdast::ListItem, src: &str) -> Vec<Blo
             Node::List(l) => {
                 for child in &l.children {
                     if let Node::ListItem(ni) = child {
-                        nested.extend(blocks_from_list_item(ni, src));
+                        nested.extend(blocks_from_list_item(ni, src, l.ordered));
                     }
                 }
             }
-            // フィールド行の下の継続段落と、その他のブロック（引用など）は捨てる
+            // その他のブロック（引用など）は捨てる
             _ => {}
         }
     }
     let mut out = Vec::new();
-    match split_field(&text) {
-        Some((name, value)) => out.push(Block::Field {
-            name,
-            value,
-            line: item_line,
-        }),
-        None => out.push(Block::Bullet {
+    if ordered {
+        // 順序付きリストは箇条書きの対象外。閉じた世界では undeclared_line になる（R10）
+        out.push(Block::OrderedList {
             text,
             continuation,
             line: item_line,
-        }),
+        });
+    } else {
+        match split_field(&text) {
+            Some((name, value)) => out.push(Block::Field {
+                name,
+                value,
+                line: item_line,
+            }),
+            None => out.push(Block::Bullet {
+                text,
+                continuation,
+                line: item_line,
+            }),
+        }
     }
     out.extend(nested);
     out

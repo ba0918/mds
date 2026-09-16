@@ -677,6 +677,25 @@ document:
     }
 
     #[test]
+    fn ordered_list_is_not_extracted_as_a_bullet() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n1. 順序付き\n\n- 箇条書き\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["reasons"],
+            json!(["- 箇条書き"]),
+            "順序付きリストは箇条書きの対象外で抽出に含めない（R10）"
+        );
+    }
+
+    #[test]
     fn item_extract_is_heading_plus_body() {
         let schema = r#"
 document:

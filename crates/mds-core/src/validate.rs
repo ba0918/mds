@@ -259,6 +259,9 @@ fn undeclared_line_for_block(block: &Block) -> Option<Finding> {
     let (detail, line) = match block {
         Block::Field { name, line, .. } => (format!("undeclared field line \"{name}\""), *line),
         Block::Bullet { text, line, .. } => (format!("undeclared bullet \"{text}\""), *line),
+        Block::OrderedList { text, line, .. } => {
+            (format!("undeclared ordered list \"{text}\""), *line)
+        }
         Block::Statement { text, line, .. } => {
             (format!("undeclared statement \"{text}\""), *line)
         }
@@ -474,6 +477,12 @@ fn validate_container(
             },
             // ブロック引用・水平線・画像などの文の対象外の行種別は閉じた世界でも無視する（R13）
             Block::Other { .. } => {}
+            // 順序付きリストはどの規則種別にも属さない。閉じた世界では undeclared_line にする（R10）
+            Block::OrderedList { .. } => {
+                if !open {
+                    push_undeclared_line(findings, block);
+                }
+            }
         }
     }
 
@@ -754,6 +763,26 @@ document:
             .filter(|f| f.kind == FindingKind::UndeclaredLine)
             .count();
         assert_eq!(undeclared, 2);
+    }
+
+    #[test]
+    fn ordered_list_is_not_a_bullet_and_is_undeclared_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        pattern: \"^親\"\n";
+        let doc = "## 理由\n\n1. 子\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::BulletPatternMismatch),
+            "順序付きリストは箇条書きの対象外なので pattern を適用しない（R10）"
+        );
+        assert!(kinds(&findings).contains(&FindingKind::UndeclaredLine));
+    }
+
+    #[test]
+    fn ordered_list_does_not_satisfy_required_bullets() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        required: true\n";
+        let doc = "## 理由\n\n1. 順序付き\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingBullets));
     }
 
     #[test]
