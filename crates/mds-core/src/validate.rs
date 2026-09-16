@@ -1077,6 +1077,21 @@ document:
     }
 
     #[test]
+    fn codeblock_line_matching_trims_leading_whitespace_and_skips_blank_lines() {
+        let schema = r#"
+document:
+  sections:
+    - name: 具体例
+      codeblock:
+        lang: gherkin
+        lines: ["^Scenario:", "^Given "]
+"#;
+        let doc = "## 具体例\n\n```gherkin\n  Scenario: 印を書く\n\n   Given 文\n```\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(!kinds(&findings).contains(&FindingKind::CodeblockLineMismatch));
+    }
+
+    #[test]
     fn blockquote_and_thematic_break_lines_are_ignored_in_closed_world() {
         let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
         let doc = "## 状況\n\n> 引用\n\n---\n\n本文。\n";
@@ -1149,6 +1164,14 @@ document:
         let doc = "# 題名\n\n- タグ: a\n- タグ: b\n- タグ: c\n";
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::RepeatMaxExceeded));
+    }
+
+    #[test]
+    fn repeat_with_max_only_omits_min_as_zero() {
+        let schema = "document:\n  preamble:\n    fields:\n      - name: タグ\n        repeat: { max: 2 }\n";
+        let doc = "# 題名\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(!kinds(&findings).contains(&FindingKind::RepeatMinNotMet));
     }
 
     #[test]

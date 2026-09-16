@@ -323,6 +323,25 @@ fn values_text_defaults_to_indented_text() {
 }
 
 #[test]
+fn values_text_indents_multiline_value_two_deeper_than_the_key() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(
+        dir.path(),
+        "schema.yaml",
+        "document:\n  sections:\n    - name: 状況\n      extract: body\n      statement:\n        required: false\n",
+    );
+    let doc = write_file(
+        dir.path(),
+        "doc.md",
+        "---\n$schema: ./schema.yaml\n---\n## 状況\n\nこれは\n続きの文\n",
+    );
+    let output = mds().args(["values", doc.to_str().unwrap()]).output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("body: これは\n  続きの文"), "stdout: {stdout}");
+}
+
+#[test]
 fn values_json_is_nested_by_path() {
     let output = mds()
         .args(["values", "fixtures/adr/0001.md", "--format", "json"])
