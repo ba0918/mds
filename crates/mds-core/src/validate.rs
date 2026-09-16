@@ -835,10 +835,34 @@ document:
     #[test]
     fn undeclared_section_lines_are_flagged_in_closed_world() {
         let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
-        let doc = "# 題名\n\n## 状況\n\n背景。\n\n## 補足\n\n- 余計な箇条書き\n";
+        let doc = "# 題名\n\n## 状況\n\n背景。\n\n## 補足\n\n- 余計な箇条書き\n\n### 補足の項目\n\n中身。\n";
         let findings = validate_src(schema, doc, false);
-        assert!(kinds(&findings).contains(&FindingKind::UndeclaredHeading));
+        let headings = findings
+            .iter()
+            .filter(|f| f.kind == FindingKind::UndeclaredHeading)
+            .count();
+        let lines = findings
+            .iter()
+            .filter(|f| f.kind == FindingKind::UndeclaredLine)
+            .count();
+        assert!(headings >= 2, "節と項目の見出しが undeclared_heading になる");
+        assert!(lines >= 2, "節の中の箇条書きと項目の中の行が undeclared_line になる");
+    }
+
+    #[test]
+    fn undeclared_preamble_lines_are_flagged_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let doc = "# 題名\n\n- 状態: 承認済み\n\n## 状況\n\n背景。\n";
+        let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::UndeclaredLine));
+    }
+
+    #[test]
+    fn undeclared_preamble_lines_are_allowed_when_open() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let doc = "# 題名\n\n- 状態: 承認済み\n\n## 状況\n\n背景。\n";
+        let findings = validate_src(schema, doc, true);
+        assert!(!kinds(&findings).contains(&FindingKind::UndeclaredLine));
     }
 
     #[test]
