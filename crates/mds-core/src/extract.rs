@@ -21,6 +21,22 @@ pub fn extract_values(schema: &Schema, document: &Document) -> Value {
     Value::Object(root)
 }
 
+/// `ast --schema` の出力。抽出値に、スキーマの `name` を `type` として添える。
+pub fn extract_typed(schema: &Schema, document: &Document) -> Value {
+    let values = extract_values(schema, document);
+    let Value::Object(values) = values else {
+        return values;
+    };
+    let mut out = Map::new();
+    if let Some(name) = &schema.name {
+        out.insert("type".to_string(), Value::String(name.clone()));
+    }
+    for (key, value) in values {
+        out.insert(key, value);
+    }
+    Value::Object(out)
+}
+
 /// `values` の text 出力。ネストは2文字のインデント、配列は番号付き。
 pub fn render_values_text(value: &Value) -> String {
     let mut out = String::new();
@@ -592,5 +608,27 @@ document:
         let doc = "## 状況\n\n1つ目。\n\n## 状況\n\n2つ目。\n";
         let v = values(schema, doc);
         assert_eq!(v["contexts"], json!(["1つ目。", "2つ目。"]));
+    }
+
+    fn typed(schema_yaml: &str, doc: &str) -> serde_json::Value {
+        let schema = parse_schema(schema_yaml).unwrap();
+        let document = Document::parse(doc).unwrap();
+        extract_typed(&schema, &document)
+    }
+
+    #[test]
+    fn typed_ast_includes_type_when_schema_is_named() {
+        let schema = "name: adr\ndocument:\n  title:\n    extract: title\n";
+        let v = typed(schema, "# 題名\n");
+        assert_eq!(v["type"], "adr");
+        assert_eq!(v["title"], "題名");
+    }
+
+    #[test]
+    fn typed_ast_omits_type_when_schema_is_unnamed() {
+        let schema = "document:\n  title:\n    extract: title\n";
+        let v = typed(schema, "# 題名\n");
+        assert!(v.get("type").is_none());
+        assert_eq!(v["title"], "題名");
     }
 }

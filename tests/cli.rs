@@ -55,6 +55,32 @@ fn ast_with_format_text_stops_with_exit_code_2() {
 }
 
 #[test]
+fn ast_schema_outputs_typed_tree() {
+    let output = mds()
+        .args(["ast", "fixtures/adr/0001.md", "--schema"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["type"], "adr");
+    assert_eq!(json["id"], "ADR-0001");
+    assert_eq!(json["sections"]["reasons"], serde_json::json!(["理由その1", "理由その2"]));
+}
+
+#[test]
+fn ast_schema_without_schema_stops() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = write_file(dir.path(), "doc.md", "# 題名\n");
+    let output = mds()
+        .args(["ast", doc.to_str().unwrap(), "--schema"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("schema_not_found"));
+}
+
+#[test]
 fn check_clean_document_exits_zero_with_no_output() {
     let output = mds()
         .args(["check", "fixtures/adr/0001.md"])

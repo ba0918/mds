@@ -35,6 +35,9 @@ enum Command {
     Ast {
         /// Markdown file to parse
         file: PathBuf,
+        /// Output a typed tree built from the schema's extract rules
+        #[arg(long)]
+        schema: bool,
         /// Output format (json only)
         #[arg(long, value_parser = ["json"])]
         format: Option<String>,
@@ -84,12 +87,21 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<u8, Stop> {
     match cli.command {
-        Command::Ast { file, .. } => {
+        Command::Ast {
+            file,
+            schema,
+            format: _,
+        } => {
             let src = read_document(&file)?;
-            let json = mds_core::ast::ast_json(&src).map_err(|e| Stop {
-                kind: "unreadable_file",
-                detail: format!("{}: {}", file.display(), e),
-            })?;
+            let json = if schema {
+                let (schema, document) = load_schema_and_document(&file, &src)?;
+                mds_core::extract::extract_typed(&schema, &document)
+            } else {
+                mds_core::ast::ast_json(&src).map_err(|e| Stop {
+                    kind: "unreadable_file",
+                    detail: format!("{}: {}", file.display(), e),
+                })?
+            };
             println!("{}", serde_json::to_string_pretty(&json).unwrap());
             Ok(0)
         }
