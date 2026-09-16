@@ -217,6 +217,12 @@ fn extract_bullets(
             _ => None,
         })
         .collect();
+    if texts.is_empty() {
+        if bullets.repeat.is_some() {
+            place(root, extract, Value::Array(Vec::new()));
+        }
+        return;
+    }
     place(root, extract, Value::Array(texts));
 }
 
@@ -521,6 +527,33 @@ document:
         assert_eq!(present["status"], "承認済み");
         let absent = values(schema, "# 題名\n");
         assert!(absent.get("status").is_none());
+    }
+
+    #[test]
+    fn non_repeated_bullets_omit_key_when_missing() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        extract: reasons
+"#;
+        let v = values(schema, "## 理由\n");
+        assert!(v.get("reasons").is_none());
+    }
+
+    #[test]
+    fn repeated_bullets_place_empty_array_when_missing() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let v = values(schema, "## 理由\n");
+        assert_eq!(v["reasons"], json!([]));
     }
 
     #[test]
