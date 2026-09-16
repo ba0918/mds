@@ -1,0 +1,13 @@
+[package]
+name = "mds"
+version = "0.1.0"
+edition = "2021"
+description = "Validate Markdown documents against a YAML schema declared in their frontmatter and extract structured values"
+
+[dependencies]
+mds-core = { path = "crates/mds-core" }
+clap = { version = "4", features = ["derive"] }
+
+[workspace]
+members = ["crates/mds-core"]
+resolver = "2"
