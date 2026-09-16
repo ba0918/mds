@@ -108,6 +108,35 @@ fn check_clean_document_exits_zero_with_no_output() {
 }
 
 #[test]
+fn check_json_outputs_empty_files_array_for_clean_file() {
+    let output = mds()
+        .args(["check", "fixtures/adr/0001.md", "--format", "json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json, serde_json::json!({ "files": [] }));
+}
+
+#[test]
+fn check_json_outputs_empty_files_array_for_clean_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(dir.path(), "schema.yaml", T_SCHEMA);
+    write_file(
+        dir.path(),
+        "doc.md",
+        "---\n$schema: ./schema.yaml\n---\n# T-1: 例\n\n## 状況\n\n本文。\n",
+    );
+    let output = mds()
+        .args(["check", dir.path().to_str().unwrap(), "--format", "json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json, serde_json::json!({ "files": [] }));
+}
+
+#[test]
 fn check_document_with_findings_exits_one_with_text() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "schema.yaml", T_SCHEMA);

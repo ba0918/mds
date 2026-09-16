@@ -267,14 +267,13 @@ fn cache_path(url: &str) -> PathBuf {
 }
 
 fn emit_check(files: &[(PathBuf, Vec<Finding>)], format: &str) -> Result<(), Stop> {
-    let non_empty: Vec<&(PathBuf, Vec<Finding>)> =
-        files.iter().filter(|(_, findings)| !findings.is_empty()).collect();
-    if non_empty.is_empty() {
-        return Ok(());
-    }
     match format {
         "text" => {
-            for (path, findings) in &non_empty {
+            // text は指摘があるときだけ出力する（R18）
+            for (path, findings) in files {
+                if findings.is_empty() {
+                    continue;
+                }
                 let path_str = path.to_string_lossy();
                 for finding in findings {
                     match finding.line {
@@ -291,8 +290,10 @@ fn emit_check(files: &[(PathBuf, Vec<Finding>)], format: &str) -> Result<(), Sto
             }
         }
         "json" => {
-            let files_json: Vec<serde_json::Value> = non_empty
+            // json は指摘が無いときも files の空配列を出力する（R18）
+            let files_json: Vec<serde_json::Value> = files
                 .iter()
+                .filter(|(_, findings)| !findings.is_empty())
                 .map(|(path, findings)| {
                     let path_str = path.to_string_lossy();
                     let findings_json: Vec<FindingJson> = findings
@@ -311,12 +312,7 @@ fn emit_check(files: &[(PathBuf, Vec<Finding>)], format: &str) -> Result<(), Sto
             let output = serde_json::json!({ "files": files_json });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
         }
-        _ => {
-            return Err(Stop {
-                kind: "schema_invalid",
-                detail: format!("unknown format {format}"),
-            })
-        }
+        _ => unreachable!("clap が --format の値を制限する"),
     }
     Ok(())
 }
