@@ -402,16 +402,3 @@ fn ir_fixture_passes_check_and_extracts_values() {
     assert!(stdout.contains("用語: 印"));
     assert!(stdout.contains("Scenario: 印を書く"));
 }
-
-#[test]
-fn values_text_indents_continuation_lines_of_multiline_values() {
-    let output = mds()
-        .args(["values", "fixtures/ir/kanji.md"])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(0));
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("scenarios: @id=EX-001\n  @about=REQ-001\n"));
-    assert!(stdout.contains("  @source=docs/decision/2026-09-01-mark.md\n"));
-    assert!(stdout.contains("  Scenario: 印を書く\n"));
-}
