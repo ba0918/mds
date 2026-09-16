@@ -79,18 +79,25 @@ struct FindingJson<'a> {
 fn main() -> ExitCode {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
-        Err(e) => {
-            // clap のメッセージは複数行に分かれるので、説明の先頭行だけを
-            // 使って mds の1行の停止理由に合わせる（R19 の argument_error）
-            let message = e.to_string();
-            let first_line = message.lines().next().unwrap_or("invalid arguments");
-            let detail = first_line
-                .strip_prefix("error: ")
-                .unwrap_or(first_line)
-                .to_string();
-            eprintln!("mds: argument_error: {detail}");
-            return ExitCode::from(2);
-        }
+        Err(e) => match e.kind() {
+            // --help と --version は標準出力に出して終了コード0で終わる（R1）
+            clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion => {
+                let _ = e.print();
+                return ExitCode::from(0);
+            }
+            _ => {
+                // clap のメッセージは複数行に分かれるので、説明の先頭行だけを
+                // 使って mds の1行の停止理由に合わせる（R19 の argument_error）
+                let message = e.to_string();
+                let first_line = message.lines().next().unwrap_or("invalid arguments");
+                let detail = first_line
+                    .strip_prefix("error: ")
+                    .unwrap_or(first_line)
+                    .to_string();
+                eprintln!("mds: argument_error: {detail}");
+                return ExitCode::from(2);
+            }
+        },
     };
     match run(cli) {
         Ok(code) => ExitCode::from(code),

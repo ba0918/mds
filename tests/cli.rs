@@ -25,6 +25,14 @@ fn mds() -> Command {
 }
 
 #[test]
+fn version_prints_mds_version_to_stdout_and_exits_zero() {
+    let output = mds().arg("--version").output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("mds "), "stdout: {stdout}");
+}
+
+#[test]
 fn ast_outputs_mdast_json_for_the_adr_fixture() {
     let mut cmd = Command::cargo_bin("mds").unwrap();
     let output = cmd
