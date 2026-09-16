@@ -80,11 +80,13 @@ fn extract_section(def: &crate::schema::Section, document: &Document, root: &mut
 
     if let Some(extract) = &def.extract {
         if def.repeat.is_some() {
-            let bodies: Vec<Value> = occurrences
-                .iter()
-                .map(|s| Value::String(section_body(s)))
-                .collect();
-            place(root, extract, Value::Array(bodies));
+            if !occurrences.is_empty() {
+                let bodies: Vec<Value> = occurrences
+                    .iter()
+                    .map(|s| Value::String(section_body(s)))
+                    .collect();
+                place(root, extract, Value::Array(bodies));
+            }
         } else if let Some(section) = occurrences.first() {
             place(root, extract, Value::String(section_body(section)));
         }
@@ -107,9 +109,7 @@ fn extract_section(def: &crate::schema::Section, document: &Document, root: &mut
                 .flat_map(|s| s.items.iter())
                 .collect();
             if items.is_empty() {
-                if item.repeat.is_some() {
-                    place(root, extract, Value::Array(Vec::new()));
-                }
+                // 0件のときはキーを省略する（R16）
             } else if item.repeat.is_some() {
                 let values: Vec<Value> = items.iter().map(|i| item_value(i)).collect();
                 place(root, extract, Value::Array(values));
@@ -129,9 +129,7 @@ fn extract_fields(fields: &[Field], blocks: &[&Block], root: &mut Map<String, Va
                 .filter(|b| matches!(b, Block::Field { name, .. } if name == &field.name))
                 .collect();
             if occurrences.is_empty() {
-                if field.repeat.is_some() {
-                    place(root, extract, Value::Array(Vec::new()));
-                }
+                // 0件のときはキーを省略する（R16）
                 continue;
             }
             let value = if field.repeat.is_some() {
@@ -151,10 +149,11 @@ fn field_single(field: &Field, block: &Block) -> Value {
         _ => "",
     };
     match field.effective_separator() {
+        // 区切った要素は前後の空白を取り除いて抽出し、空の要素は空文字列として残す（R8）
         Some(sep) => Value::Array(
             value
                 .split(sep)
-                .map(|s| Value::String(s.to_string()))
+                .map(|s| Value::String(s.trim().to_string()))
                 .collect(),
         ),
         None => Value::String(value.to_string()),
@@ -181,9 +180,7 @@ fn extract_statement(
         })
         .collect();
     if texts.is_empty() {
-        if statement.repeat.is_some() {
-            place(root, extract, Value::Array(Vec::new()));
-        }
+        // 0件のときはキーを省略する（R16）
         return;
     }
     let value = if statement.repeat.is_some() {
@@ -217,9 +214,7 @@ fn extract_bullets(
         })
         .collect();
     if texts.is_empty() {
-        if bullets.repeat.is_some() {
-            place(root, extract, Value::Array(Vec::new()));
-        }
+        // 0件のときはキーを省略する（R16）
         return;
     }
     place(root, extract, Value::Array(texts));
@@ -242,38 +237,29 @@ fn extract_table(
         .filter(|b| matches!(b, Block::Table { .. }))
         .collect();
     if tables.is_empty() {
-        if table.repeat.is_some() {
-            place(root, extract, Value::Array(Vec::new()));
-        }
+        // 0件のときはキーを省略する（R16）
         return;
     }
-    let objects: Vec<Value> = tables.iter().map(|b| table_objects(b)).collect();
-    let value = if table.repeat.is_some() {
-        Value::Array(objects)
-    } else {
-        objects.into_iter().next().unwrap()
-    };
-    place(root, extract, value);
+    // 表は repeat の宣言に関わらず常に配列。複数の表は現れた順に1つの配列へ連結する（R16）
+    let rows: Vec<Value> = tables.iter().flat_map(|b| table_objects(b)).collect();
+    place(root, extract, Value::Array(rows));
 }
 
-fn table_objects(block: &Block) -> Value {
+fn table_objects(block: &Block) -> Vec<Value> {
     match block {
-        Block::Table { header, rows, .. } => {
-            let rows: Vec<Value> = rows
-                .iter()
-                .map(|row| {
-                    let mut map = Map::new();
-                    for (i, cell) in row.iter().enumerate() {
-                        if let Some(key) = header.get(i) {
-                            map.insert(key.clone(), Value::String(cell.clone()));
-                        }
+        Block::Table { header, rows, .. } => rows
+            .iter()
+            .map(|row| {
+                let mut map = Map::new();
+                for (i, cell) in row.iter().enumerate() {
+                    if let Some(key) = header.get(i) {
+                        map.insert(key.clone(), Value::String(cell.clone()));
                     }
-                    Value::Object(map)
-                })
-                .collect();
-            Value::Array(rows)
-        }
-        _ => Value::Array(Vec::new()),
+                }
+                Value::Object(map)
+            })
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -294,9 +280,7 @@ fn extract_codeblock(
         .filter(|b| matches!(b, Block::Code { .. }))
         .collect();
     if codes.is_empty() {
-        if codeblock.repeat.is_some() {
-            place(root, extract, Value::Array(Vec::new()));
-        }
+        // 0件のときはキーを省略する（R16）
         return;
     }
     let values: Vec<Value> = codes
@@ -328,29 +312,35 @@ fn item_value(item: &DocItem) -> Value {
     if body.is_empty() {
         Value::String(heading)
     } else {
-        Value::String(format!("{heading}\n\n{body}"))
+        Value::String(format!("{heading}\n{body}"))
     }
 }
 
 /// 本文を組み立てる。文と箇条書き（必要ならフィールド行も）を含み、
-/// 表・コードブロック・項目は含めない。文は空行で、箇条書きは改行でつなぐ。
+/// 表・コードブロック・項目は含めない。文どうしは空行、それ以外の
+/// 隣接（文と箇条書き・文とフィールド行・箇条書きどうしなど）は改行で
+/// つなぐ。箇条書きは R10 の抽出要素（継続段落を含む文字列）を使う。
 fn body_from_blocks(blocks: &[Block], include_fields: bool) -> String {
     let mut out = String::new();
-    let mut last_was_bullet = false;
+    let mut last_was_statement = false;
     for block in blocks {
-        let (text, is_bullet): (String, bool) = match block {
-            Block::Statement { text, .. } => (text.clone(), false),
-            Block::Bullet { .. } => (block.bullet_element(), true),
+        let (text, is_statement): (String, bool) = match block {
+            Block::Statement { text, .. } => (text.clone(), true),
+            Block::Bullet { .. } => (block.bullet_element(), false),
             Block::Field { name, value, .. } if include_fields => {
                 (format!("- {name}: {value}"), false)
             }
             _ => continue,
         };
         if !out.is_empty() {
-            out.push_str(if is_bullet && last_was_bullet { "\n" } else { "\n\n" });
+            out.push_str(if is_statement && last_was_statement {
+                "\n\n"
+            } else {
+                "\n"
+            });
         }
         out.push_str(&text);
-        last_was_bullet = is_bullet;
+        last_was_statement = is_statement;
     }
     out
 }
@@ -515,7 +505,7 @@ document:
     }
 
     #[test]
-    fn repeated_node_is_always_an_array_even_for_zero_or_one() {
+    fn repeated_node_is_an_array_when_present_and_omits_key_when_absent() {
         let schema = r#"
 document:
   preamble:
@@ -527,7 +517,7 @@ document:
         let present = values(schema, "# 題名\n\n- タグ: a\n");
         assert_eq!(present["tags"], json!(["a"]));
         let absent = values(schema, "# 題名\n");
-        assert_eq!(absent["tags"], json!([]));
+        assert!(absent.get("tags").is_none(), "0件のときはキーを省略する");
     }
 
     #[test]
@@ -559,7 +549,7 @@ document:
     }
 
     #[test]
-    fn repeated_bullets_place_empty_array_when_missing() {
+    fn repeated_bullets_omit_key_when_missing() {
         let schema = r#"
 document:
   sections:
@@ -569,7 +559,36 @@ document:
         extract: reasons
 "#;
         let v = values(schema, "## 理由\n");
-        assert_eq!(v["reasons"], json!([]));
+        assert!(v.get("reasons").is_none(), "箇条書き0件のときはキーを省略する");
+    }
+
+    #[test]
+    fn separator_trims_elements_and_keeps_empty_ones() {
+        let schema = r#"
+document:
+  preamble:
+    fields:
+      - name: タグ
+        separator: ","
+        extract: tags
+"#;
+        let v = values(schema, "# 題名\n\n- タグ: a, b,,c,\n");
+        assert_eq!(v["tags"], json!(["a", "b", "", "c", ""]));
+    }
+
+    #[test]
+    fn repeated_field_with_separator_extracts_array_of_arrays() {
+        let schema = r#"
+document:
+  preamble:
+    fields:
+      - name: タグ
+        repeat: { min: 0 }
+        separator: ","
+        extract: tags
+"#;
+        let v = values(schema, "# 題名\n\n- タグ: a,b\n- タグ: c\n");
+        assert_eq!(v["tags"], json!([["a", "b"], ["c"]]));
     }
 
     #[test]
@@ -606,7 +625,8 @@ document:
 "#;
         let doc = "## 状況\n\n背景。\n\n- 箇条1\n- 箇条2\n\n| a |\n|---|\n| x |\n\n```gherkin\nScenario: 例\n```\n";
         let v = values(schema, doc);
-        assert_eq!(v["sections"]["body"], "背景。\n\n- 箇条1\n- 箇条2");
+        // 文と箇条書きの間は改行、文どうしだけ空行でつなぐ
+        assert_eq!(v["sections"]["body"], "背景。\n- 箇条1\n- 箇条2");
     }
 
     #[test]
@@ -672,7 +692,55 @@ document:
 "#;
         let doc = "## 要求\n\n### REQ-001: 名前\n\n- 種類: algorithm\n\n本文。\n";
         let v = values(schema, doc);
-        assert_eq!(v["items"], json!(["REQ-001: 名前\n\n- 種類: algorithm\n\n本文。"]));
+        // 見出しと本文は改行でつなぎ、本文内は文どうしだけ空行でつなぐ
+        assert_eq!(v["items"], json!(["REQ-001: 名前\n- 種類: algorithm\n本文。"]));
+    }
+
+    #[test]
+    fn table_extract_concatenates_multiple_tables_in_document_order() {
+        let schema = r#"
+document:
+  sections:
+    - name: 用語集
+      table:
+        required: false
+        header: [a, b]
+        extract: glossary
+"#;
+        let doc = "## 用語集\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n| a | b |\n|---|---|\n| 3 | 4 |\n";
+        let v = values(schema, doc);
+        assert_eq!(v["glossary"], json!([{ "a": "1", "b": "2" }, { "a": "3", "b": "4" }]));
+    }
+
+    #[test]
+    fn repeated_table_extracts_flat_row_objects_without_nesting() {
+        let schema = r#"
+document:
+  sections:
+    - name: 用語集
+      table:
+        repeat: { min: 0 }
+        header: [a, b]
+        extract: glossary
+"#;
+        let doc = "## 用語集\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+        let v = values(schema, doc);
+        assert_eq!(v["glossary"], json!([{ "a": "1", "b": "2" }]));
+    }
+
+    #[test]
+    fn table_omits_key_when_no_tables() {
+        let schema = r#"
+document:
+  sections:
+    - name: 用語集
+      table:
+        repeat: { min: 0 }
+        header: [a, b]
+        extract: glossary
+"#;
+        let v = values(schema, "## 用語集\n");
+        assert!(v.get("glossary").is_none(), "表0件のときはキーを省略する");
     }
 
     #[test]
