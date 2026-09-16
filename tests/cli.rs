@@ -212,3 +212,44 @@ fn check_broken_frontmatter_stops_with_frontmatter_invalid() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("frontmatter_invalid"));
 }
+
+#[test]
+fn values_text_defaults_to_indented_text() {
+    let output = mds()
+        .args(["values", "fixtures/adr/0001.md"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("id: ADR-0001\n"));
+    assert!(stdout.contains("status: 承認済み\n"));
+    assert!(stdout.contains("sections:\n  context: 背景の段落。\n"));
+    assert!(stdout.contains("  reasons:\n    1. 理由その1\n    2. 理由その2\n"));
+}
+
+#[test]
+fn values_json_is_nested_by_path() {
+    let output = mds()
+        .args(["values", "fixtures/adr/0001.md", "--format", "json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["id"], "ADR-0001");
+    assert_eq!(json["title"], "ADR-0001: テストの印は @kotowari[ID, ...]");
+    assert_eq!(json["status"], "承認済み");
+    assert_eq!(json["date"], "2026-09-16");
+    assert_eq!(json["sections"]["context"], "背景の段落。");
+    assert_eq!(json["sections"]["decision"], "判断の内容。");
+    assert_eq!(json["sections"]["reasons"], serde_json::json!(["理由その1", "理由その2"]));
+}
+
+#[test]
+fn values_without_schema_stops_with_schema_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = write_file(dir.path(), "doc.md", "# 題名\n");
+    let output = mds().args(["values", doc.to_str().unwrap()]).output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("schema_not_found"));
+}

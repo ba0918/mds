@@ -39,6 +39,14 @@ enum Command {
         #[arg(long, value_parser = ["json"])]
         format: Option<String>,
     },
+    /// Extract the values declared by the schema
+    Values {
+        /// Markdown file to extract from
+        file: PathBuf,
+        /// Output format
+        #[arg(long, value_parser = ["json", "text"], default_value = "text")]
+        format: String,
+    },
 }
 
 /// 検査を行えないときの停止。終了コード 2 で終わり、理由を標準エラーに 1 行出す。
@@ -83,6 +91,17 @@ fn run(cli: Cli) -> Result<u8, Stop> {
                 detail: format!("{}: {}", file.display(), e),
             })?;
             println!("{}", serde_json::to_string_pretty(&json).unwrap());
+            Ok(0)
+        }
+        Command::Values { file, format } => {
+            let src = read_document(&file)?;
+            let (schema, document) = load_schema_and_document(&file, &src)?;
+            let values = mds_core::extract::extract_values(&schema, &document);
+            match format.as_str() {
+                "json" => println!("{}", serde_json::to_string_pretty(&values).unwrap()),
+                "text" => print!("{}", mds_core::extract::render_values_text(&values)),
+                _ => unreachable!("clap が --format の値を制限する"),
+            }
             Ok(0)
         }
         Command::Check {
