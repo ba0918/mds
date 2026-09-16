@@ -288,7 +288,7 @@ fn validate_container(
                     }
                 }
             }
-            Block::Bullet { text, line } => match rules.bullets {
+            Block::Bullet { text, line, .. } => match rules.bullets {
                 Some(bullets) => {
                     bullet_count += 1;
                     if when_allows(bullets.when.as_ref(), blocks) {
@@ -677,11 +677,35 @@ document:
     }
 
     #[test]
-    fn continuation_paragraph_in_a_list_item_is_reported_in_closed_world() {
+    fn continuation_paragraph_is_part_of_the_bullet_not_undeclared() {
         let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 0 }\n";
         let doc = "## 理由\n\n- 親\n\n  続きの段落\n";
         let findings = validate_src(schema, doc, false);
-        assert!(kinds(&findings).contains(&FindingKind::UndeclaredLine));
+        assert!(!kinds(&findings).contains(&FindingKind::UndeclaredLine));
+    }
+
+    #[test]
+    fn continuation_paragraph_does_not_count_as_statement() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      statement:\n        required: true\n      bullets:\n        repeat: { min: 0 }\n";
+        let doc = "## 理由\n\n- 親\n\n  続きの段落\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingStatement));
+    }
+
+    #[test]
+    fn bullet_pattern_is_not_applied_to_continuation_paragraphs() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 0 }\n        pattern: \"^親\"\n";
+        let doc = "## 理由\n\n- 親\n\n  続きの段落はパターンに合わない\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(!kinds(&findings).contains(&FindingKind::BulletPatternMismatch));
+    }
+
+    #[test]
+    fn nested_list_items_are_each_a_top_level_bullet() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 2 }\n";
+        let doc = "## 理由\n\n- 親\n  - 子\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(!kinds(&findings).contains(&FindingKind::RepeatMinNotMet));
     }
 
     #[test]

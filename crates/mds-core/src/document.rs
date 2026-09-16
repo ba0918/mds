@@ -51,6 +51,8 @@ pub enum Block {
     },
     Bullet {
         text: String,
+        /// リスト項目の子である継続段落。R10 では箇条書きの一部として扱う
+        continuation: Vec<String>,
         line: usize,
     },
     Statement {
@@ -152,34 +154,7 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
             let mut out = Vec::new();
             for child in &list.children {
                 if let Node::ListItem(item) = child {
-                    let item_line = start_line(child);
-                    // 最初のブロックが項目の本文で、フィールド行か箇条書きかを決める。
-                    // 2つ目以降のブロック（継続段落・入れ子リスト）は捨てずに
-                    // 文や箇条書きとして分類する。閉じた世界の対象に含めるため。
-                    let mut children = item.children.iter();
-                    if let Some(first) = children.next() {
-                        let text = raw_slice(src, first);
-                        match split_field(&text) {
-                            Some((name, value)) => out.push(Block::Field {
-                                name,
-                                value,
-                                line: item_line,
-                            }),
-                            None => out.push(Block::Bullet {
-                                text,
-                                line: item_line,
-                            }),
-                        }
-                    }
-                    for rest in children {
-                        match rest {
-                            Node::Paragraph(_) => out.push(Block::Statement {
-                                text: raw_slice(src, rest),
-                                line: start_line(rest),
-                            }),
-                            other => out.extend(blocks_from_node(other, src)),
-                        }
-                    }
+                    out.extend(blocks_from_list_item(item, src));
                 }
             }
             out
@@ -209,6 +184,49 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
     }
 }
 
+/// リスト項目を1つ以上のブロックにする。先頭の段落がフィールド行か箇条書きかを
+/// 決め、続く段落（継続段落）は箇条書きの一部にする（R10）。入れ子のリストは
+/// 各項目をトップレベルの箇条書きとして扱う。
+fn blocks_from_list_item(item: &markdown::mdast::ListItem, src: &str) -> Vec<Block> {
+    let item_line = line_at(item.position.as_ref());
+    let mut children = item.children.iter();
+    let Some(first) = children.next() else {
+        return Vec::new();
+    };
+    let text = raw_slice(src, first);
+    let mut continuation: Vec<String> = Vec::new();
+    let mut nested: Vec<Block> = Vec::new();
+    for rest in children {
+        match rest {
+            Node::Paragraph(p) => continuation.push(slice_at(src, p.position.as_ref())),
+            Node::List(l) => {
+                for child in &l.children {
+                    if let Node::ListItem(ni) = child {
+                        nested.extend(blocks_from_list_item(ni, src));
+                    }
+                }
+            }
+            // フィールド行の下の継続段落と、その他のブロック（引用など）は捨てる
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    match split_field(&text) {
+        Some((name, value)) => out.push(Block::Field {
+            name,
+            value,
+            line: item_line,
+        }),
+        None => out.push(Block::Bullet {
+            text,
+            continuation,
+            line: item_line,
+        }),
+    }
+    out.extend(nested);
+    out
+}
+
 /// `- 名前: 値` の形なら名前と値に分ける。形でなければ None。
 fn split_field(text: &str) -> Option<(String, String)> {
     let idx = text.find(':')?;
@@ -218,6 +236,27 @@ fn split_field(text: &str) -> Option<(String, String)> {
     }
     let value = text[idx + 1..].trim();
     Some((name.to_string(), value.to_string()))
+}
+
+impl Block {
+    /// R10 の箇条書きの抽出要素。元の `- ` 行と継続段落を改行でつなぐ。
+    /// 継続段落が複数のときは継続段落どうしを空行でつなぐ。
+    pub fn bullet_element(&self) -> String {
+        let Block::Bullet {
+            text,
+            continuation,
+            ..
+        } = self
+        else {
+            return String::new();
+        };
+        let mut out = format!("- {text}");
+        if !continuation.is_empty() {
+            out.push('\n');
+            out.push_str(&continuation.join("\n\n"));
+        }
+        out
+    }
 }
 
 /// 項目見出しを ID と題名に分ける。`:` が無ければ全体を ID にする。
@@ -259,12 +298,20 @@ fn cell_text(cell: &Node) -> String {
 }
 
 fn start_line(node: &Node) -> usize {
-    node.position().map(|p| p.start.line).unwrap_or(1)
+    line_at(node.position())
 }
 
 /// ノードの位置が指す範囲の生テキスト。インラインの Markdown 記法を保持する。
 fn raw_slice(src: &str, node: &Node) -> String {
-    match node.position() {
+    slice_at(src, node.position())
+}
+
+fn line_at(position: Option<&markdown::unist::Position>) -> usize {
+    position.map(|p| p.start.line).unwrap_or(1)
+}
+
+fn slice_at(src: &str, position: Option<&markdown::unist::Position>) -> String {
+    match position {
         Some(pos) => src[pos.start.offset..pos.end.offset].trim().to_string(),
         None => String::new(),
     }

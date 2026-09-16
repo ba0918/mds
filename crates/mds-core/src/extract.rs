@@ -208,9 +208,12 @@ fn extract_bullets(
     let texts: Vec<Value> = blocks
         .iter()
         .copied()
-        .filter_map(|b| match b {
-            Block::Bullet { text, .. } => Some(Value::String(text.clone())),
-            _ => None,
+        .filter_map(|b| {
+            if matches!(b, Block::Bullet { .. }) {
+                Some(Value::String(b.bullet_element()))
+            } else {
+                None
+            }
         })
         .collect();
     if texts.is_empty() {
@@ -337,7 +340,7 @@ fn body_from_blocks(blocks: &[Block], include_fields: bool) -> String {
     for block in blocks {
         let (text, is_bullet): (String, bool) = match block {
             Block::Statement { text, .. } => (text.clone(), false),
-            Block::Bullet { text, .. } => (format!("- {text}"), true),
+            Block::Bullet { .. } => (block.bullet_element(), true),
             Block::Field { name, value, .. } if include_fields => {
                 (format!("- {name}: {value}"), false)
             }
@@ -496,7 +499,7 @@ document:
         assert_eq!(v["date"], "2026-09-16");
         assert_eq!(v["sections"]["context"], "背景。");
         assert_eq!(v["sections"]["decision"], "判断。");
-        assert_eq!(v["sections"]["reasons"], json!(["理由1", "理由2"]));
+        assert_eq!(v["sections"]["reasons"], json!(["- 理由1", "- 理由2"]));
     }
 
     #[test]
@@ -620,7 +623,37 @@ document:
 "#;
         let doc = "## 状況\n\n- 理由1\n\n  続きの段落\n  - 入れ子\n";
         let v = values(schema, doc);
-        assert_eq!(v["sections"]["body"], "- 理由1\n\n続きの段落\n\n- 入れ子");
+        assert_eq!(v["sections"]["body"], "- 理由1\n続きの段落\n- 入れ子");
+    }
+
+    #[test]
+    fn bullet_extract_includes_marker_and_continuation() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n- 親\n\n  続きの段落\n\n- 次\n";
+        let v = values(schema, doc);
+        assert_eq!(v["reasons"], json!(["- 親\n続きの段落", "- 次"]));
+    }
+
+    #[test]
+    fn bullet_with_multiple_continuations_joins_them_with_blank_line() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n- 親\n\n  続き1\n\n  続き2\n";
+        let v = values(schema, doc);
+        assert_eq!(v["reasons"], json!(["- 親\n続き1\n\n続き2"]));
     }
 
     #[test]
