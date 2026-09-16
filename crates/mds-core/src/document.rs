@@ -203,56 +203,66 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
 /// 項目は箇条書きの対象外で、閉じた世界では undeclared_line になる（R10）。
 /// 入れ子のリストは各項目をトップレベルの箇条書きとして扱う。コードブロック・
 /// 表などの子はブロックとして残し、閉じた世界の undeclared_line の対象にする。
+/// コードブロック・表が先頭のときも箇条書きの lead を作らず、ブロックとして
+/// 残す（継続段落を吸わない）。
 fn blocks_from_list_item(
     item: &markdown::mdast::ListItem,
     src: &str,
     ordered: bool,
 ) -> Vec<Block> {
     let item_line = line_at(item.position.as_ref());
-    let mut children = item.children.iter();
-    let Some(first) = children.next() else {
-        return Vec::new();
-    };
-    let text = raw_slice(src, first);
     let mut continuation: Vec<String> = Vec::new();
     let mut extra: Vec<Block> = Vec::new();
-    for rest in children {
-        match rest {
-            Node::Paragraph(p) => continuation.push(slice_at(src, p.position.as_ref())),
+    let mut lead_text: Option<String> = None;
+    for (i, child) in item.children.iter().enumerate() {
+        match child {
+            // 先頭の段落だけがフィールド行・箇条書き・順序付き項目の lead になる。
+            // 続く段落は継続段落として lead に付く（R10）。
+            Node::Paragraph(_) => {
+                let text = raw_slice(src, child);
+                if i == 0 {
+                    lead_text = Some(text);
+                } else {
+                    continuation.push(text);
+                }
+            }
             Node::List(l) => {
-                for child in &l.children {
-                    if let Node::ListItem(ni) = child {
+                for nested in &l.children {
+                    if let Node::ListItem(ni) = nested {
                         extra.extend(blocks_from_list_item(ni, src, l.ordered));
                     }
                 }
             }
             // コードブロック・表などのブロックは捨てず、ブロックとして残す。
             // 引用・水平線などは blocks_from_node が Block::Other にして閉じた
-            // 世界でも無視される（R13）。
+            // 世界でも無視される（R13）。lead が無い項目の段落は継続段落のまま
+            // どこにも付かず、R10 のとおり文にも数えない。
             other => extra.extend(blocks_from_node(other, src)),
         }
     }
     let mut out = Vec::new();
-    if ordered {
-        // 順序付きリストは箇条書きの対象外。閉じた世界では undeclared_line になる（R10）
-        out.push(Block::OrderedList {
-            text,
-            continuation,
-            line: item_line,
-        });
-    } else {
-        match split_field(&text) {
-            Some((name, value)) => out.push(Block::Field {
-                name,
-                value,
-                continuation,
-                line: item_line,
-            }),
-            None => out.push(Block::Bullet {
+    if let Some(text) = lead_text {
+        if ordered {
+            // 順序付きリストは箇条書きの対象外。閉じた世界では undeclared_line になる（R10）
+            out.push(Block::OrderedList {
                 text,
                 continuation,
                 line: item_line,
-            }),
+            });
+        } else {
+            match split_field(&text) {
+                Some((name, value)) => out.push(Block::Field {
+                    name,
+                    value,
+                    continuation,
+                    line: item_line,
+                }),
+                None => out.push(Block::Bullet {
+                    text,
+                    continuation,
+                    line: item_line,
+                }),
+            }
         }
     }
     out.extend(extra);

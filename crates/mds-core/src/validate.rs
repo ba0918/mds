@@ -762,6 +762,30 @@ document:
     }
 
     #[test]
+    fn code_block_as_first_child_of_list_item_is_undeclared_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 0 }\n";
+        let doc = "## 理由\n\n- ```python\n  x = 1\n  ```\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "先頭がコードブロックのリスト項目は undeclared_line になる: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn table_as_first_child_of_list_item_is_undeclared_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 0 }\n";
+        let doc = "## 理由\n\n- | a | b |\n  |---|---|\n  | 1 | 2 |\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "先頭が表のリスト項目は undeclared_line になる: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
     fn table_child_of_list_item_is_undeclared_in_closed_world() {
         let schema = "document:\n  sections:\n    - name: 理由\n";
         let doc = "## 理由\n\n- 親\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n";
