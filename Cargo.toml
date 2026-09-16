@@ -20,4 +20,5 @@ tempfile = "3"
 
 [workspace]
 members = ["crates/mds-core"]
+default-members = [".", "crates/mds-core"]
 resolver = "2"
