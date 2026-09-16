@@ -1,0 +1,42 @@
+name: adr
+open: false
+document:
+  title:
+    pattern: "^ADR-\\d{4}:"
+    extract: title
+  preamble:
+    fields:
+      - name: ID
+        extract: id
+      - name: 状態
+        enum: [承認済み, 却下, 提案中]
+        extract: status
+      - name: 日付
+        pattern: "^\\d{4}-\\d{2}-\\d{2}"
+        extract: date
+      - name: 判断の記録
+        pattern: "^docs/"
+        required: false
+  sections:
+    - name: 状況
+      extract: sections.context
+      statement:
+        required: false
+    - name: 決定
+      extract: sections.decision
+      statement:
+        required: false
+    - name: 理由
+      bullets:
+        repeat:
+          min: 0
+        extract: sections.reasons
+    - name: 却下した案
+      bullets:
+        repeat:
+          min: 0
+      required: false
+    - name: 結果
+      statement:
+        required: false
+      required: false

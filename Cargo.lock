@@ -361,6 +361,7 @@ dependencies = [
  "clap",
  "mds-core",
  "predicates",
+ "serde",
  "serde_json",
  "tempfile",
 ]
