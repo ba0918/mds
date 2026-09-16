@@ -850,6 +850,23 @@ document:
     }
 
     #[test]
+    fn image_only_paragraph_after_code_block_lead_is_not_a_statement() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: true\n      codeblock:\n        required: false\n        lang: python\n      bullets:\n        repeat: { min: 0 }\n";
+        let doc = "## 状況\n\n- ```python\n  x = 1\n  ```\n\n  ![alt](img.png)\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::MissingStatement),
+            "先頭がコードブロックのリスト項目の画像だけの段落は文に数えない（R9）: {:?}",
+            kinds(&findings)
+        );
+        assert!(
+            !kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "先頭がコードブロックのリスト項目の画像だけの段落は undeclared_line にしない（R13）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
     fn nested_list_items_are_each_a_top_level_bullet() {
         let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 2 }\n";
         let doc = "## 理由\n\n- 親\n  - 子\n";

@@ -228,11 +228,9 @@ fn blocks_from_list_item(
                 } else {
                     // lead が無い項目（先頭がコードブロック・表など）の段落は
                     // 文として扱う。継続段落は lead に付く場合だけだから、この
-                    // 段落はどこにも吸われない（R10）。
-                    extra.push(Block::Statement {
-                        text,
-                        line: start_line(child),
-                    });
+                    // 段落はどこにも吸われない（R10）。画像だけの段落は
+                    // blocks_from_node が文の対象外にする（R9）。
+                    extra.extend(blocks_from_node(child, src));
                 }
             }
             Node::List(l) => {
