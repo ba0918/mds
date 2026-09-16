@@ -1,0 +1,60 @@
+name: ir
+open: false
+document:
+  title:
+    pattern: "^.+"
+    extract: title
+  preamble:
+    statement:
+      required: true
+      extract: scope
+  sections:
+    - name: 要求
+      item:
+        id: "REQ-\\d{3,}"
+        repeat:
+          min: 0
+        ordered: true
+        fields:
+          - name: 種類
+            enum: [event_driven, state_driven, ubiquitous, prohibition, invariant, algorithm]
+          - name: 出典
+            pattern: "^docs/"
+          - name: 検証
+            enum: [unit, property, proof, review]
+          - name: 定義
+            when: { field: 種類, eq: algorithm }
+        statement:
+          required: false
+    - name: 決定表
+      item:
+        id: "TBL-\\d{3,}"
+        repeat:
+          min: 0
+        fields:
+          - name: 出典
+            pattern: "^docs/"
+        statement:
+          required: false
+    - name: 性質
+      item:
+        id: "PROP-\\d{3,}"
+        repeat:
+          min: 0
+        fields:
+          - name: 出典
+            pattern: "^docs/"
+        statement:
+          required: false
+    - name: 用語集
+      table:
+        header: [用語, 意味, 出典]
+        extract: glossary
+    - name: 具体例
+      codeblock:
+        lang: gherkin
+        lines:
+          - "^@"
+          - "^Scenario:"
+          - "^(Given|When|Then|And|But) "
+        extract: scenarios

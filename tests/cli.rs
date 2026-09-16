@@ -375,3 +375,30 @@ fn check_directory_stops_on_unreadable_file() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unreadable_file"));
 }
+
+#[test]
+fn check_fixtures_directory_passes() {
+    let output = mds().args(["check", "fixtures"]).output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn ir_fixture_passes_check_and_extracts_values() {
+    let checked = mds()
+        .args(["check", "fixtures/ir/kanji.md"])
+        .output()
+        .unwrap();
+    assert_eq!(checked.status.code(), Some(0));
+
+    let values = mds()
+        .args(["values", "fixtures/ir/kanji.md"])
+        .output()
+        .unwrap();
+    assert_eq!(values.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&values.stdout);
+    assert!(stdout.contains("title: 印の仕様"));
+    assert!(stdout.contains("scope: この文書は、印の構文と意味を正規化した仕様を扱う。"));
+    assert!(stdout.contains("用語: 印"));
+    assert!(stdout.contains("Scenario: 印を書く"));
+}
