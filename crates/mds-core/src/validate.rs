@@ -917,4 +917,189 @@ document:
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::CodeblockLineMismatch));
     }
+
+    // ---- R14 / R15 / R8(ordered): 出現回数・条件付き・順序 ----
+
+    #[test]
+    fn repeat_min_not_met_for_section_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      repeat: { min: 2 }
+"#;
+        let doc = "## 理由\n\n本文。\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::RepeatMinNotMet));
+    }
+
+    #[test]
+    fn repeat_min_not_met_for_field_is_found() {
+        let schema = r#"
+document:
+  preamble:
+    fields:
+      - name: タグ
+        repeat: { min: 2 }
+"#;
+        let doc = "# 題名\n\n- タグ: a\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::RepeatMinNotMet));
+    }
+
+    #[test]
+    fn repeat_max_exceeded_for_optional_section_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 補足
+      required: false
+      statement:
+        required: false
+"#;
+        let doc = "## 補足\n\n1つ目。\n\n## 補足\n\n2つ目。\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::RepeatMaxExceeded));
+    }
+
+    #[test]
+    fn repeat_max_exceeded_for_field_is_found() {
+        let schema = r#"
+document:
+  preamble:
+    fields:
+      - name: タグ
+        repeat: { max: 2 }
+"#;
+        let doc = "# 題名\n\n- タグ: a\n- タグ: b\n- タグ: c\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::RepeatMaxExceeded));
+    }
+
+    #[test]
+    fn item_with_no_repeat_requires_exactly_one() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        id: "REQ-\\d{3,}"
+        statement:
+          required: false
+"#;
+        let doc = "## 要求\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::RepeatMinNotMet));
+    }
+
+    #[test]
+    fn item_repeat_max_exceeded_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        id: "REQ-\\d{3,}"
+        repeat: { max: 1 }
+        statement:
+          required: false
+"#;
+        let doc = "## 要求\n\n### REQ-001: a\n\n本文。\n\n### REQ-002: b\n\n本文。\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::RepeatMaxExceeded));
+    }
+
+    #[test]
+    fn field_order_mismatch_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      ordered: true
+      fields:
+        - name: 種類
+        - name: 定義
+"#;
+        let doc = "## 要求\n\n- 定義: REQ-001\n- 種類: algorithm\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::FieldOrderMismatch));
+    }
+
+    #[test]
+    fn fields_in_declared_order_pass() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      ordered: true
+      fields:
+        - name: 種類
+        - name: 定義
+"#;
+        let doc = "## 要求\n\n- 種類: algorithm\n- 定義: REQ-001\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(!kinds(&findings).contains(&FindingKind::FieldOrderMismatch));
+    }
+
+    #[test]
+    fn when_eq_true_requires_the_field() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      fields:
+        - name: 種類
+        - name: 定義
+          when: { field: 種類, eq: algorithm }
+"#;
+        let doc = "## 要求\n\n- 種類: algorithm\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingRequiredField));
+    }
+
+    #[test]
+    fn when_eq_false_skips_the_requirement() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      fields:
+        - name: 種類
+        - name: 定義
+          when: { field: 種類, eq: algorithm }
+"#;
+        let doc = "## 要求\n\n- 種類: ubiquitous\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(!kinds(&findings).contains(&FindingKind::MissingRequiredField));
+    }
+
+    #[test]
+    fn when_with_missing_reference_makes_eq_false() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      fields:
+        - name: 定義
+          when: { field: 種類, eq: algorithm }
+"#;
+        let doc = "## 要求\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(!kinds(&findings).contains(&FindingKind::MissingRequiredField));
+    }
+
+    #[test]
+    fn when_with_missing_reference_makes_ne_true() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      fields:
+        - name: 定義
+          when: { field: 種類, ne: algorithm }
+"#;
+        let doc = "## 要求\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingRequiredField));
+    }
 }
