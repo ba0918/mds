@@ -53,7 +53,7 @@ pub fn validate(schema: &Schema, document: &Document, open: bool) -> Vec<Finding
                         detail: format!("undeclared section heading \"{}\"", section.name),
                     });
                     for block in &section.blocks {
-                        findings.push(undeclared_line_for_block(block));
+                        push_undeclared_line(&mut findings, block);
                     }
                     for item in &section.items {
                         findings.push(Finding {
@@ -62,7 +62,7 @@ pub fn validate(schema: &Schema, document: &Document, open: bool) -> Vec<Finding
                             detail: format!("undeclared item heading \"{}\"", item.id),
                         });
                         for block in &item.blocks {
-                            findings.push(undeclared_line_for_block(block));
+                            push_undeclared_line(&mut findings, block);
                         }
                     }
                 }
@@ -135,7 +135,7 @@ fn validate_items(section: &Section, items: &[Item], findings: &mut Vec<Finding>
                 detail: format!("undeclared item heading \"{}\"", item.id),
             });
             for block in &item.blocks {
-                findings.push(undeclared_line_for_block(block));
+                push_undeclared_line(findings, block);
             }
         }
         return;
@@ -254,7 +254,8 @@ impl<'a> ContainerRules<'a> {
 }
 
 /// 宣言されていない行の指摘をブロックの種別に応じた文言で作る。
-fn undeclared_line_for_block(block: &Block) -> Finding {
+/// 文の対象外の行種別（ブロック引用・水平線・画像など）は None を返す（R13）。
+fn undeclared_line_for_block(block: &Block) -> Option<Finding> {
     let (detail, line) = match block {
         Block::Field { name, line, .. } => (format!("undeclared field line \"{name}\""), *line),
         Block::Bullet { text, line, .. } => (format!("undeclared bullet \"{text}\""), *line),
@@ -263,12 +264,18 @@ fn undeclared_line_for_block(block: &Block) -> Finding {
         }
         Block::Table { line, .. } => ("undeclared table".to_string(), *line),
         Block::Code { line, .. } => ("undeclared code block".to_string(), *line),
-        Block::Other { line } => ("line is not allowed by the schema".to_string(), *line),
+        Block::Other { .. } => return None,
     };
-    Finding {
+    Some(Finding {
         kind: FindingKind::UndeclaredLine,
         line: Some(line),
         detail,
+    })
+}
+
+fn push_undeclared_line(findings: &mut Vec<Finding>, block: &Block) {
+    if let Some(finding) = undeclared_line_for_block(block) {
+        findings.push(finding);
     }
 }
 
@@ -328,7 +335,7 @@ fn validate_container(
                     }
                     None => {
                         if !open {
-                            findings.push(undeclared_line_for_block(block));
+                            push_undeclared_line(findings, block);
                         }
                     }
                 }
@@ -353,7 +360,7 @@ fn validate_container(
                 }
                 None => {
                     if !open {
-                        findings.push(undeclared_line_for_block(block));
+                        push_undeclared_line(findings, block);
                     }
                 }
             },
@@ -388,7 +395,7 @@ fn validate_container(
                 }
                 None => {
                     if !open {
-                        findings.push(undeclared_line_for_block(block));
+                        push_undeclared_line(findings, block);
                     }
                 }
             },
@@ -421,7 +428,7 @@ fn validate_container(
                 }
                 None => {
                     if !open {
-                        findings.push(undeclared_line_for_block(block));
+                        push_undeclared_line(findings, block);
                     }
                 }
             },
@@ -461,15 +468,12 @@ fn validate_container(
                 }
                 None => {
                     if !open {
-                        findings.push(undeclared_line_for_block(block));
+                        push_undeclared_line(findings, block);
                     }
                 }
             },
-            Block::Other { .. } => {
-                if !open {
-                    findings.push(undeclared_line_for_block(block));
-                }
-            }
+            // ブロック引用・水平線・画像などの文の対象外の行種別は閉じた世界でも無視する（R13）
+            Block::Other { .. } => {}
         }
     }
 
@@ -1070,6 +1074,23 @@ document:
         let doc = "## 具体例\n\n```gherkin\nScenario: 印を書く\nBad line\n```\n";
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::CodeblockLineMismatch));
+    }
+
+    #[test]
+    fn blockquote_and_thematic_break_lines_are_ignored_in_closed_world() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let doc = "## 状況\n\n> 引用\n\n---\n\n本文。\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(!kinds(&findings).contains(&FindingKind::UndeclaredLine));
+    }
+
+    #[test]
+    fn image_only_line_is_not_counted_as_statement() {
+        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: true\n";
+        let doc = "## 状況\n\n![alt](img.png)\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingStatement));
+        assert!(!kinds(&findings).contains(&FindingKind::UndeclaredLine));
     }
 
     // ---- R14 / R15 / R8(ordered): 出現回数・条件付き・順序 ----

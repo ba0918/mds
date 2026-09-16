@@ -147,6 +147,8 @@ impl Document {
 fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
     let line = start_line(node);
     match node {
+        // 画像だけの行（例: `![alt](img.png)`）は文の対象外（R9）
+        Node::Paragraph(_) if is_image_only_paragraph(node) => vec![Block::Other { line }],
         Node::Paragraph(_) => {
             vec![Block::Statement {
                 text: raw_slice(src, node),
@@ -228,6 +230,19 @@ fn blocks_from_list_item(item: &markdown::mdast::ListItem, src: &str) -> Vec<Blo
     }
     out.extend(nested);
     out
+}
+
+/// 段落が画像ノードだけで構成されているか。画像だけの行は文として数えない。
+fn is_image_only_paragraph(node: &Node) -> bool {
+    match node {
+        Node::Paragraph(p) => !p.children.is_empty() && p.children.iter().all(is_image),
+        _ => false,
+    }
+}
+
+/// インライン要素が画像か。
+fn is_image(node: &Node) -> bool {
+    matches!(node, Node::Image(_))
 }
 
 /// `- 名前: 値` の形なら名前と値に分ける。形でなければ None。
