@@ -26,6 +26,13 @@ The core is kept separate from the CLI so that it can be reused, for example ins
 | Test | `cargo test` |
 | Lint | `cargo clippy` |
 | Run locally | `cargo run -- <args>` |
+| Quality gates (pre-commit) | `lefthook run pre-commit --no-auto-install` |
+
+lefthook runs the quality gates (fmt / clippy / test) on every `pre-commit`, as defined in
+`lefthook.yml`. Do not run `lefthook install` on a machine whose global pre-commit hook already
+delegates to `lefthook run pre-commit --no-auto-install` (as on the developer machines provisioned
+with mise): installing would replace that global hook. On a machine without such a global hook,
+run `lefthook install` once to generate the local hooks.
 
 ## Conventions specific to this project
 
