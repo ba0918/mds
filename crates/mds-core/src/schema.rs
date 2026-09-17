@@ -278,6 +278,7 @@ fn validate_section(section: &Section) -> Result<(), SchemaError> {
     if let Some(repeat) = &section.repeat {
         repeat.validate()?;
     }
+    reject_capture_extract(section.extract.as_ref(), "section")?;
     validate_fields(&section.fields)?;
     validate_statement(section.statement.as_ref())?;
     validate_bullets(section.bullets.as_ref())?;
@@ -285,11 +286,13 @@ fn validate_section(section: &Section) -> Result<(), SchemaError> {
         if let Some(repeat) = &table.repeat {
             repeat.validate()?;
         }
+        reject_capture_extract(table.extract.as_ref(), "table")?;
     }
     if let Some(codeblock) = &section.codeblock {
         if let Some(repeat) = &codeblock.repeat {
             repeat.validate()?;
         }
+        reject_capture_extract(codeblock.extract.as_ref(), "codeblock")?;
     }
     if let Some(item) = &section.item {
         validate_item(item)?;
@@ -301,6 +304,7 @@ fn validate_item(item: &Item) -> Result<(), SchemaError> {
     if let Some(repeat) = &item.repeat {
         repeat.validate()?;
     }
+    reject_capture_extract(item.extract.as_ref(), "item")?;
     // 項目の内部のフィールド行・文・箇条書きには extract を宣言できない（R16）
     if let Some(field) = item.fields.iter().find(|f| f.extract.is_some()) {
         return Err(SchemaError(format!(
@@ -332,6 +336,7 @@ fn validate_fields(fields: &[Field]) -> Result<(), SchemaError> {
         if let Some(when) = &field.when {
             when.validate()?;
         }
+        reject_capture_extract(field.extract.as_ref(), "field")?;
     }
     Ok(())
 }
@@ -344,6 +349,7 @@ fn validate_statement(statement: Option<&Statement>) -> Result<(), SchemaError> 
         if let Some(when) = &statement.when {
             when.validate()?;
         }
+        reject_capture_extract(statement.extract.as_ref(), "statement")?;
     }
     Ok(())
 }
@@ -356,6 +362,21 @@ fn validate_bullets(bullets: Option<&Bullets>) -> Result<(), SchemaError> {
         if let Some(when) = &bullets.when {
             when.validate()?;
         }
+        reject_capture_extract(bullets.extract.as_ref(), "bullets")?;
+    }
+    Ok(())
+}
+
+/// 題名以外のノードには書式2（名前付きキャプチャ）の抽出を宣言できない（R16）。
+/// 宣言すると schema_invalid の停止になる。
+fn reject_capture_extract(
+    extract: Option<&Extract>,
+    node: &str,
+) -> Result<(), SchemaError> {
+    if let Some(Extract::Capture { .. }) = extract {
+        return Err(SchemaError(format!(
+            "{node} extract cannot use the named-group capture form"
+        )));
     }
     Ok(())
 }
@@ -528,6 +549,48 @@ document:
     fn invalid_item_id_regex_is_an_error() {
         let yaml = "document:\n  sections:\n    - name: x\n      item:\n        id: \"(\"\n";
         assert!(parse_schema(yaml).is_err());
+    }
+
+    #[test]
+    fn capture_extract_outside_title_is_schema_invalid() {
+        // 書式2（名前付きキャプチャ）は題名にだけ使える。題名以外のノードで
+        // 宣言したときは schema_invalid の停止になる（R16）。
+        let cases: &[(&str, &str)] = &[
+            (
+                "field",
+                "document:\n  preamble:\n    fields:\n      - name: 状態\n        extract: { path: s, group: x }\n",
+            ),
+            (
+                "statement",
+                "document:\n  preamble:\n    statement:\n      extract: { path: s, group: x }\n",
+            ),
+            (
+                "bullets",
+                "document:\n  preamble:\n    bullets:\n      extract: { path: b, group: x }\n",
+            ),
+            (
+                "section",
+                "document:\n  sections:\n    - name: 状況\n      extract: { path: sec, group: x }\n",
+            ),
+            (
+                "item",
+                "document:\n  sections:\n    - name: 要求\n      item:\n        extract: { path: item, group: x }\n",
+            ),
+            (
+                "table",
+                "document:\n  sections:\n    - name: 用語集\n      table:\n        header: [a]\n        extract: { path: t, group: x }\n",
+            ),
+            (
+                "codeblock",
+                "document:\n  sections:\n    - name: コード\n      codeblock:\n        extract: { path: c, group: x }\n",
+            ),
+        ];
+        for (node, yaml) in cases {
+            assert!(
+                parse_schema(yaml).is_err(),
+                "{node} に Capture 形の extract を宣言したのに schema_invalid にならない"
+            );
+        }
     }
 
     #[test]
