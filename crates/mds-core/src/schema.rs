@@ -26,6 +26,11 @@ impl Pattern {
     pub fn source(&self) -> &str {
         &self.source
     }
+
+    /// 指定の名前の名前付きキャプチャを含むか。Capture 形の抽出が使う（R16）。
+    pub fn has_capture_group(&self, name: &str) -> bool {
+        self.compiled.capture_names().flatten().any(|n| n == name)
+    }
 }
 
 impl<'de> Deserialize<'de> for Pattern {
@@ -258,11 +263,33 @@ pub fn parse_schema(yaml: &str) -> Result<Schema, SchemaError> {
 }
 
 fn validate_schema(schema: &Schema) -> Result<(), SchemaError> {
+    if let Some(title) = &schema.document.title {
+        validate_title(title)?;
+    }
     if let Some(preamble) = &schema.document.preamble {
         validate_preamble(preamble)?;
     }
     for section in &schema.document.sections {
         validate_section(section)?;
+    }
+    Ok(())
+}
+
+fn validate_title(title: &Title) -> Result<(), SchemaError> {
+    let Some(Extract::Capture { group, .. }) = &title.extract else {
+        return Ok(());
+    };
+    // 書式2（名前付きキャプチャ）は pattern のキャプチャを取る。pattern が無い、
+    // または pattern が指定の名前付きキャプチャを含まない題名は schema_invalid（R16）
+    let Some(pattern) = &title.pattern else {
+        return Err(SchemaError(
+            "title capture extract requires a pattern".into(),
+        ));
+    };
+    if !pattern.has_capture_group(group) {
+        return Err(SchemaError(format!(
+            "title pattern does not contain a named capture group \"{group}\""
+        )));
     }
     Ok(())
 }
@@ -390,7 +417,7 @@ name: adr
 open: false
 document:
   title:
-    pattern: "^ADR-\\d{4}:"
+    pattern: "^ADR-(?<id>\\d{4}):"
     extract: { path: id, group: id }
   preamble:
     fields:
@@ -603,6 +630,30 @@ document:
         fields:
           - name: 種類
             extract: kind
+"#;
+        assert!(parse_schema(yaml).is_err());
+    }
+
+    #[test]
+    fn capture_extract_without_pattern_is_schema_invalid() {
+        // 書式2の抽出は pattern の名前付きキャプチャを取る。pattern が無い
+        // 題名は schema_invalid の停止になる（R16）。
+        let yaml = r#"
+document:
+  title:
+    extract: { path: id, group: id }
+"#;
+        assert!(parse_schema(yaml).is_err());
+    }
+
+    #[test]
+    fn capture_extract_with_pattern_missing_the_group_is_schema_invalid() {
+        // pattern が指定の名前付きキャプチャを含まない題名も schema_invalid（R16）。
+        let yaml = r#"
+document:
+  title:
+    pattern: "^ADR-(?<other>\\d{4}):"
+    extract: { path: id, group: id }
 "#;
         assert!(parse_schema(yaml).is_err());
     }
