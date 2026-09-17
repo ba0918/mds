@@ -294,6 +294,48 @@ fn push_undeclared_line(findings: &mut Vec<Finding>, block: &Block) {
     }
 }
 
+/// 箇条書きとして1本を検証する。箇条書きが宣言されていれば本数を数え、
+/// pattern を照合する。無ければ undeclared_line（閉じた世界）。
+/// `Block::Bullet` と、宣言された名前と一致しない `- 名前: 値` 行（R8）が共有する。
+fn validate_bullet(
+    bullets: Option<&Bullets>,
+    text: &str,
+    line: usize,
+    blocks: &[Block],
+    bullet_count: &mut u64,
+    open: bool,
+    findings: &mut Vec<Finding>,
+) {
+    match bullets {
+        Some(bullets) => {
+            *bullet_count += 1;
+            if when_allows(bullets.when.as_ref(), blocks) {
+                if let Some(pattern) = &bullets.pattern {
+                    if !pattern.is_match(text) {
+                        findings.push(Finding {
+                            kind: FindingKind::BulletPatternMismatch,
+                            line: Some(line),
+                            detail: format!(
+                                "bullet \"{text}\" does not match pattern \"{}\"",
+                                pattern.source()
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+        None => {
+            if !open {
+                findings.push(Finding {
+                    kind: FindingKind::UndeclaredLine,
+                    line: Some(line),
+                    detail: format!("undeclared bullet \"{text}\""),
+                });
+            }
+        }
+    }
+}
+
 fn validate_container(
     rules: &ContainerRules,
     blocks: &[Block],
@@ -349,36 +391,30 @@ fn validate_container(
                         }
                     }
                     None => {
-                        if !open {
-                            push_undeclared_line(findings, block);
-                        }
+                        // R8: 宣言された名前と一致しない `- 名前: 値` 行は
+                        // 箇条書きとして扱う
+                        let text = format!("{name}: {value}");
+                        validate_bullet(
+                            rules.bullets,
+                            &text,
+                            *line,
+                            blocks,
+                            &mut bullet_count,
+                            open,
+                            findings,
+                        );
                     }
                 }
             }
-            Block::Bullet { text, line, .. } => match rules.bullets {
-                Some(bullets) => {
-                    bullet_count += 1;
-                    if when_allows(bullets.when.as_ref(), blocks) {
-                        if let Some(pattern) = &bullets.pattern {
-                            if !pattern.is_match(text) {
-                                findings.push(Finding {
-                                    kind: FindingKind::BulletPatternMismatch,
-                                    line: Some(*line),
-                                    detail: format!(
-                                        "bullet \"{text}\" does not match pattern \"{}\"",
-                                        pattern.source()
-                                    ),
-                                });
-                            }
-                        }
-                    }
-                }
-                None => {
-                    if !open {
-                        push_undeclared_line(findings, block);
-                    }
-                }
-            },
+            Block::Bullet { text, line, .. } => validate_bullet(
+                rules.bullets,
+                text,
+                *line,
+                blocks,
+                &mut bullet_count,
+                open,
+                findings,
+            ),
             Block::Statement { text, line } => match rules.statement {
                 Some(statement) => {
                     statement_count += 1;
@@ -957,6 +993,41 @@ document:
         let findings = validate_src(SCHEMA, ok_body(), false);
         assert!(!kinds(&findings).contains(&FindingKind::UndeclaredLine));
         assert!(!kinds(&findings).contains(&FindingKind::MissingRequiredField));
+    }
+
+    #[test]
+    fn undeclared_field_name_line_counts_as_a_bullet() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 1 }\n";
+        let doc = "## 理由\n\n- 判断の記録かどうかの見分け（A134: 決定の節の見出しを1つ以上持つファイル）\n";
+        let findings = validate_src(schema, doc, false);
+        let ks = kinds(&findings);
+        assert!(
+            !ks.contains(&FindingKind::UndeclaredLine),
+            "未宣言の名前の `- 名前: 値` 行は箇条書きとして扱う（R8）: {ks:?}"
+        );
+        assert!(
+            !ks.contains(&FindingKind::RepeatMinNotMet),
+            "箇条書きとして本数に数える（R10）: {ks:?}"
+        );
+    }
+
+    #[test]
+    fn undeclared_field_name_line_is_subject_to_bullet_pattern() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 0 }\n        pattern: \"^A134\"\n";
+        let doc = "## 理由\n\n- 判断の記録かどうかの見分け（A134: 決定の節の見出しを1つ以上持つファイル）\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::BulletPatternMismatch),
+            "箇条書きとして pattern を適用する（R10）"
+        );
+    }
+
+    #[test]
+    fn undeclared_field_name_line_is_undeclared_when_no_bullets_declared() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      statement:\n        required: false\n";
+        let doc = "## 理由\n\n- 判断の記録かどうかの見分け（A134: 決定の節の見出しを1つ以上持つファイル）\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::UndeclaredLine));
     }
 
     #[test]

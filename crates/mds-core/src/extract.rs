@@ -14,7 +14,7 @@ pub fn extract_values(schema: &Schema, document: &Document) -> Value {
         let blocks: Vec<&Block> = document.preamble.iter().collect();
         extract_fields(&preamble.fields, &blocks, &mut root);
         extract_statement(preamble.statement.as_ref(), &blocks, &mut root);
-        extract_bullets(preamble.bullets.as_ref(), &blocks, &mut root);
+        extract_bullets(&preamble.fields, preamble.bullets.as_ref(), &blocks, &mut root);
     }
     for def in &schema.document.sections {
         extract_section(def, document, &mut root);
@@ -85,12 +85,12 @@ fn extract_section(def: &crate::schema::Section, document: &Document, root: &mut
             if !occurrences.is_empty() {
                 let bodies: Vec<Value> = occurrences
                     .iter()
-                    .map(|s| Value::String(section_body(s)))
+                    .map(|s| Value::String(section_body(s, &def.fields)))
                     .collect();
                 place(root, extract, Value::Array(bodies));
             }
         } else if let Some(section) = occurrences.first() {
-            place(root, extract, Value::String(section_body(section)));
+            place(root, extract, Value::String(section_body(section, &def.fields)));
         }
     }
 
@@ -100,7 +100,7 @@ fn extract_section(def: &crate::schema::Section, document: &Document, root: &mut
         .collect();
     extract_fields(&def.fields, &blocks, root);
     extract_statement(def.statement.as_ref(), &blocks, root);
-    extract_bullets(def.bullets.as_ref(), &blocks, root);
+    extract_bullets(&def.fields, def.bullets.as_ref(), &blocks, root);
     extract_table(def.table.as_ref(), &blocks, root);
     extract_codeblock(def.codeblock.as_ref(), &blocks, root);
 
@@ -113,13 +113,21 @@ fn extract_section(def: &crate::schema::Section, document: &Document, root: &mut
             if items.is_empty() {
                 // 0件のときはキーを省略する（R16）
             } else if item.repeat.is_some() {
-                let values: Vec<Value> = items.iter().map(|i| item_value(i)).collect();
+                let values: Vec<Value> = items
+                    .iter()
+                    .map(|i| item_value(i, &item.fields))
+                    .collect();
                 place(root, extract, Value::Array(values));
             } else {
-                place(root, extract, item_value(items[0]));
+                place(root, extract, item_value(items[0], &item.fields));
             }
         }
     }
+}
+
+/// スキーマが宣言したフィールド行の名前と一致するか。R8 のフィールド行判定。
+fn is_declared_field(fields: &[Field], name: &str) -> bool {
+    fields.iter().any(|f| f.name == name)
 }
 
 fn extract_fields(fields: &[Field], blocks: &[&Block], root: &mut Map<String, Value>) {
@@ -203,6 +211,7 @@ fn extract_statement(
 }
 
 fn extract_bullets(
+    fields: &[Field],
     bullets: Option<&Bullets>,
     blocks: &[&Block],
     root: &mut Map<String, Value>,
@@ -213,12 +222,19 @@ fn extract_bullets(
     let Some(extract) = &bullets.extract else {
         return;
     };
+    // 宣言された名前と一致しない `- 名前: 値` 行は箇条書きとして扱う（R8）。
+    // フィールド行の抽出要素（`- 名前: 値`）を箇条書きの要素として使う。
     let texts: Vec<Value> = blocks
         .iter()
         .copied()
         .filter_map(|b| {
             if matches!(b, Block::Bullet { .. }) {
                 Some(Value::String(b.bullet_element()))
+            } else if matches!(
+                b,
+                Block::Field { name, .. } if !is_declared_field(fields, name)
+            ) {
+                Some(Value::String(b.field_element()))
             } else {
                 None
             }
@@ -309,17 +325,17 @@ fn extract_codeblock(
     place(root, extract, value);
 }
 
-fn section_body(section: &DocSection) -> String {
-    body_from_blocks(&section.blocks, false)
+fn section_body(section: &DocSection, fields: &[Field]) -> String {
+    body_from_blocks(&section.blocks, fields, false)
 }
 
-fn item_value(item: &DocItem) -> Value {
+fn item_value(item: &DocItem, fields: &[Field]) -> Value {
     let heading = if item.title.is_empty() {
         item.id.clone()
     } else {
         format!("{}: {}", item.id, item.title)
     };
-    let body = body_from_blocks(&item.blocks, true);
+    let body = body_from_blocks(&item.blocks, fields, true);
     if body.is_empty() {
         Value::String(heading)
     } else {
@@ -331,14 +347,19 @@ fn item_value(item: &DocItem) -> Value {
 /// 表・コードブロック・項目は含めない。文どうしは空行、それ以外の
 /// 隣接（文と箇条書き・文とフィールド行・箇条書きどうしなど）は改行で
 /// つなぐ。箇条書きは R10 の抽出要素（継続段落を含む文字列）を使う。
-fn body_from_blocks(blocks: &[Block], include_fields: bool) -> String {
+/// 宣言された名前と一致しない `- 名前: 値` 行は箇条書きとして本文に含める（R8）。
+fn body_from_blocks(blocks: &[Block], fields: &[Field], include_fields: bool) -> String {
     let mut out = String::new();
     let mut last_was_statement = false;
     for block in blocks {
         let (text, is_statement): (String, bool) = match block {
             Block::Statement { text, .. } => (text.clone(), true),
             Block::Bullet { .. } => (block.bullet_element(), false),
-            Block::Field { .. } if include_fields => (block.field_element(), false),
+            Block::Field { name, .. }
+                if include_fields || !is_declared_field(fields, name) =>
+            {
+                (block.field_element(), false)
+            }
             _ => continue,
         };
         if !out.is_empty() {
@@ -499,6 +520,46 @@ document:
         assert_eq!(v["sections"]["context"], "背景。");
         assert_eq!(v["sections"]["decision"], "判断。");
         assert_eq!(v["sections"]["reasons"], json!(["- 理由1", "- 理由2"]));
+    }
+
+    #[test]
+    fn undeclared_field_name_line_is_extracted_as_a_bullet() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n- 判断の記録かどうかの見分け（A134: 決定の節の見出しを1つ以上持つファイル）\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["reasons"],
+            json!(["- 判断の記録かどうかの見分け（A134: 決定の節の見出しを1つ以上持つファイル）"]),
+            "未宣言の名前の `- 名前: 値` 行は箇条書きとして抽出する（R8・R16）"
+        );
+    }
+
+    #[test]
+    fn section_body_includes_undeclared_field_name_line_as_a_bullet() {
+        let schema = r#"
+document:
+  sections:
+    - name: 状況
+      extract: sections.body
+      statement:
+        required: false
+      bullets:
+        repeat: { min: 0 }
+"#;
+        let doc = "## 状況\n\n- 判断の記録かどうかの見分け（A134: 決定の節の見出しを1つ以上持つファイル）\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["sections"]["body"],
+            "- 判断の記録かどうかの見分け（A134: 決定の節の見出しを1つ以上持つファイル）",
+            "節の本文はフィールド行を含めず、箇条書きとして含める（R16）"
+        );
     }
 
     #[test]
