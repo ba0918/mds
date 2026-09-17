@@ -74,6 +74,8 @@ pub enum Block {
         value: String,
         /// フィールド行の子である継続段落。R8 ではフィールド行の一部として扱う
         continuation: Vec<String>,
+        /// 子のブロック（入れ子の箇条書き・コードブロック・表など）。R10
+        children: Vec<Block>,
         line: usize,
     },
     Bullet {
@@ -85,6 +87,8 @@ pub enum Block {
         lead_on_marker_line: bool,
         /// リスト項目の子である継続段落。R10 では箇条書きの一部として扱う
         continuation: Vec<String>,
+        /// 子のブロック（入れ子の箇条書き・コードブロック・表など）。R10
+        children: Vec<Block>,
         line: usize,
     },
     /// 順序付きリストの項目（`1. ` など）。箇条書きの対象外（R10）。
@@ -218,7 +222,7 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
             let mut out = Vec::new();
             for child in &list.children {
                 if let Node::ListItem(item) = child {
-                    out.extend(blocks_from_list_item(item, src, list.ordered));
+                    out.extend(blocks_from_list_item(item, src, list.ordered, false));
                 }
             }
             out
@@ -251,17 +255,21 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
 /// リスト項目を1つ以上のブロックにする。先頭の段落がフィールド行か箇条書きかを
 /// 決め、続く段落（継続段落）は箇条書きの一部にする（R10）。順序付きリストの
 /// 項目は箇条書きの対象外で、閉じた世界では undeclared_line になる（R10）。
-/// 入れ子のリストは各項目をトップレベルの箇条書きとして扱う。コードブロック・
-/// 表などの子はブロックとして残し、閉じた世界の undeclared_line の対象にする。
+/// 入れ子のリストは親の箇条書きの子ブロックとして保持する（R10）。コードブロック・
+/// 表などの子もブロックとして子に残し、閉じた世界の undeclared_line の対象にする。
 /// 先頭がコードブロック・表などで lead の段落が無いとき、後続の段落は文として
 /// 扱う（R10）。文の出現回数・規則（R9）の対象になり、閉じた世界では
-/// undeclared_line になる。
-fn blocks_from_list_item(item: &markdown::mdast::ListItem, src: &str, ordered: bool) -> Vec<Block> {
+/// undeclared_line になる。`preserve_indent` が真のとき、子の行の元のインデントを
+/// 保ったまま元の行を取る（仕様 R10 の「そのままのインデントで含める」のため）。
+fn blocks_from_list_item(
+    item: &markdown::mdast::ListItem,
+    src: &str,
+    ordered: bool,
+    preserve_indent: bool,
+) -> Vec<Block> {
     let item_line = line_at(item.position.as_ref());
-    let mut continuation: Vec<String> = Vec::new();
+    let mut lead_block: Option<Block> = None;
     let mut extra: Vec<Block> = Vec::new();
-    let mut lead_text: Option<String> = None;
-    let mut lead_on_marker_line = false;
     for (i, child) in item.children.iter().enumerate() {
         match child {
             // 先頭の段落だけがフィールド行・箇条書き・順序付き項目の lead になる。
@@ -271,11 +279,45 @@ fn blocks_from_list_item(item: &markdown::mdast::ListItem, src: &str, ordered: b
                 if i == 0 {
                     // 段落の1行目がマーカー行にあれば元の行が内容を持つ。
                     // 別の行にあれば段落全体を抽出要素に加える（R10）
-                    lead_on_marker_line = item.position.as_ref().map(|p| p.start.line)
+                    let lead_on_marker_line = item.position.as_ref().map(|p| p.start.line)
                         == child.position().map(|p| p.start.line);
-                    lead_text = Some(text);
-                } else if lead_text.is_some() {
-                    continuation.push(text);
+                    let line_text = original_item_line(item, src, preserve_indent);
+                    lead_block = Some(if ordered {
+                        // 順序付きリストは箇条書きの対象外。閉じた世界では undeclared_line（R10）
+                        Block::OrderedList {
+                            text,
+                            continuation: Vec::new(),
+                            line: item_line,
+                        }
+                    } else {
+                        match split_field(&text) {
+                            Some((name, value)) => Block::Field {
+                                line_text,
+                                text,
+                                lead_on_marker_line,
+                                name,
+                                value,
+                                continuation: Vec::new(),
+                                children: Vec::new(),
+                                line: item_line,
+                            },
+                            None => Block::Bullet {
+                                line_text,
+                                text,
+                                lead_on_marker_line,
+                                continuation: Vec::new(),
+                                children: Vec::new(),
+                                line: item_line,
+                            },
+                        }
+                    });
+                } else if lead_block.is_some() {
+                    match &mut lead_block {
+                        Some(Block::Field { continuation, .. })
+                        | Some(Block::Bullet { continuation, .. })
+                        | Some(Block::OrderedList { continuation, .. }) => continuation.push(text),
+                        _ => {}
+                    }
                 } else {
                     // lead が無い項目（先頭がコードブロック・表など）の段落は
                     // 文として扱う。継続段落は lead に付く場合だけだから、この
@@ -285,48 +327,37 @@ fn blocks_from_list_item(item: &markdown::mdast::ListItem, src: &str, ordered: b
                 }
             }
             Node::List(l) => {
-                for nested in &l.children {
-                    if let Node::ListItem(ni) = nested {
-                        extra.extend(blocks_from_list_item(ni, src, l.ordered));
+                let mut nested = Vec::new();
+                for nested_item in &l.children {
+                    if let Node::ListItem(ni) = nested_item {
+                        nested.extend(blocks_from_list_item(ni, src, l.ordered, true));
                     }
                 }
+                match &mut lead_block {
+                    // 入れ子のリストは親の子として保持する（R10）
+                    Some(Block::Field { children, .. }) | Some(Block::Bullet { children, .. }) => {
+                        children.extend(nested)
+                    }
+                    _ => extra.extend(nested),
+                }
             }
-            // コードブロック・表などのブロックは捨てず、ブロックとして残す。
+            // コードブロック・表などのブロックは捨てず、子のブロックとして残す。
             // 引用・水平線などは blocks_from_node が Block::Other にして閉じた
             // 世界でも無視される（R13）。
-            other => extra.extend(blocks_from_node(other, src)),
+            other => {
+                let blocks = blocks_from_node(other, src);
+                match &mut lead_block {
+                    Some(Block::Field { children, .. }) | Some(Block::Bullet { children, .. }) => {
+                        children.extend(blocks)
+                    }
+                    _ => extra.extend(blocks),
+                }
+            }
         }
     }
     let mut out = Vec::new();
-    if let Some(text) = lead_text {
-        if ordered {
-            // 順序付きリストは箇条書きの対象外。閉じた世界では undeclared_line になる（R10）
-            out.push(Block::OrderedList {
-                text,
-                continuation,
-                line: item_line,
-            });
-        } else {
-            let line_text = original_item_line(item, src);
-            match split_field(&text) {
-                Some((name, value)) => out.push(Block::Field {
-                    line_text,
-                    text,
-                    lead_on_marker_line,
-                    name,
-                    value,
-                    continuation,
-                    line: item_line,
-                }),
-                None => out.push(Block::Bullet {
-                    line_text,
-                    text,
-                    lead_on_marker_line,
-                    continuation,
-                    line: item_line,
-                }),
-            }
-        }
+    if let Some(lead) = lead_block {
+        out.push(lead);
     }
     out.extend(extra);
     out
@@ -346,15 +377,32 @@ fn is_image(node: &Node) -> bool {
 }
 
 /// リスト項目の元の1行目（マーカーとその直後の空白を含む）。行頭のインデントは
-/// トップレベルの箇条書きとして扱うため取り除く（R10）。行末の空白（ハード改行）
-/// は元の行の一部として残す
-fn original_item_line(item: &markdown::mdast::ListItem, src: &str) -> String {
+/// トップレベルの箇条書きとして扱うため取り除く（R10）。子の行は `preserve_indent`
+/// が真で、元のインデントを保ったままの行を取る（仕様 R10 の「そのままの
+/// インデントで抽出要素に含める」のため）。行末の空白（ハード改行）は元の行の
+/// 一部として残す
+fn original_item_line(
+    item: &markdown::mdast::ListItem,
+    src: &str,
+    preserve_indent: bool,
+) -> String {
     let offset = item.position.as_ref().map(|p| p.start.offset).unwrap_or(0);
+    let line_start = if preserve_indent {
+        // マーカー行の行頭まで遡って、子のインデントを含む行を取る
+        src[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0)
+    } else {
+        offset
+    };
     let end = src[offset..]
         .find('\n')
         .map(|i| offset + i)
         .unwrap_or(src.len());
-    src[offset..end].trim_start().to_string()
+    if preserve_indent {
+        // 子の行は元のインデントを保ったまま返す
+        src[line_start..end].to_string()
+    } else {
+        src[offset..end].trim_start().to_string()
+    }
 }
 
 /// `- 名前: 値` の形なら名前と値に分ける。形でなければ None。
@@ -369,25 +417,56 @@ fn split_field(text: &str) -> Option<(String, String)> {
 }
 
 impl Block {
-    /// R10 の箇条書きの抽出要素。元の行（マーカーとその直後の空白を含む）と
-    /// 継続段落を改行でつなぐ。継続段落が複数のときは継続段落どうしを空行でつなぐ。
+    /// 子のブロック（入れ子の箇条書き・コードブロック・表など）。箇条書きでも
+    /// フィールド行でもないブロックは空を返す。
+    pub fn children(&self) -> &[Block] {
+        match self {
+            Block::Field { children, .. } | Block::Bullet { children, .. } => children,
+            _ => &[],
+        }
+    }
+
+    /// R10 の箇条書きの抽出要素。元の行（マーカーとその直後の空白を含む）、
+    /// 継続段落、子の箇条書きの行を改行でつなぐ。継続段落が複数のときは
+    /// 継続段落どうしを空行でつなぐ。子の箇条書きの行は、そのままのインデントで
+    /// 含める。`- 名前: 値` 行を箇条書きとして扱うときも同じ要素を使う（R8）。
     pub fn bullet_element(&self) -> String {
-        let Block::Bullet {
-            line_text,
-            text,
-            lead_on_marker_line,
-            continuation,
-            ..
-        } = self
-        else {
-            return String::new();
+        let (line_text, text, lead_on_marker_line, continuation) = match self {
+            Block::Bullet {
+                line_text,
+                text,
+                lead_on_marker_line,
+                continuation,
+                ..
+            }
+            | Block::Field {
+                line_text,
+                text,
+                lead_on_marker_line,
+                continuation,
+                ..
+            } => (line_text, text, *lead_on_marker_line, continuation),
+            _ => return String::new(),
         };
-        element_from_line(line_text, text, *lead_on_marker_line, continuation)
+        let mut out = element_from_line(line_text, text, lead_on_marker_line, continuation);
+        let child_lines: Vec<String> = self
+            .children()
+            .iter()
+            .filter_map(|child| match child {
+                Block::Bullet { .. } | Block::Field { .. } => Some(child.bullet_element()),
+                _ => None,
+            })
+            .collect();
+        if !child_lines.is_empty() {
+            out.push('\n');
+            out.push_str(&child_lines.join("\n"));
+        }
+        out
     }
 
     /// フィールド行の抽出要素。元の行（マーカーとその直後の空白を含む）と
     /// 継続段落を改行でつなぐ。継続段落が複数のときは継続段落どうしを
-    /// 空行でつなぐ（R8・R10・R16）。
+    /// 空行でつなぐ（R8・R10・R16）。子の箇条書きの行は含めない。
     pub fn field_element(&self) -> String {
         let Block::Field {
             line_text,
@@ -493,5 +572,141 @@ fn slice_at(src: &str, position: Option<&markdown::unist::Position>) -> String {
     match position {
         Some(pos) => src[pos.start.offset..pos.end.offset].trim().to_string(),
         None => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn section_blocks(doc: &Document) -> &[Block] {
+        assert_eq!(doc.sections.len(), 1, "節が1つあること");
+        &doc.sections[0].blocks
+    }
+
+    #[test]
+    fn nested_list_items_become_children_of_the_parent_bullet() {
+        let doc = Document::parse("## 理由\n\n- 親\n  - 子\n    - 孫\n").unwrap();
+        let blocks = section_blocks(&doc);
+        assert_eq!(blocks.len(), 1);
+        let Block::Bullet { text, children, .. } = &blocks[0] else {
+            panic!("親が Bullet になる");
+        };
+        assert_eq!(text, "親");
+        assert_eq!(children.len(), 1);
+        let Block::Bullet { text, children, .. } = &children[0] else {
+            panic!("子が Bullet になる");
+        };
+        assert_eq!(text, "子");
+        assert_eq!(children.len(), 1);
+        let Block::Bullet { text, .. } = &children[0] else {
+            panic!("孫が Bullet になる");
+        };
+        assert_eq!(text, "孫");
+    }
+
+    #[test]
+    fn nested_list_children_keep_their_indentation() {
+        let doc = Document::parse("## 理由\n\n- 親\n  - 子\n    - 孫\n").unwrap();
+        let blocks = section_blocks(&doc);
+        let Block::Bullet {
+            line_text,
+            children,
+            ..
+        } = &blocks[0]
+        else {
+            panic!("親が Bullet になる");
+        };
+        assert_eq!(line_text, "- 親");
+        let Block::Bullet {
+            line_text,
+            children,
+            ..
+        } = &children[0]
+        else {
+            panic!("子が Bullet になる");
+        };
+        assert_eq!(line_text, "  - 子");
+        let Block::Bullet { line_text, .. } = &children[0] else {
+            panic!("孫が Bullet になる");
+        };
+        assert_eq!(line_text, "    - 孫");
+    }
+
+    #[test]
+    fn continuation_paragraph_attaches_to_the_parent_bullet() {
+        let doc = Document::parse("## 理由\n\n- 親\n\n  続きの段落\n  - 子\n").unwrap();
+        let blocks = section_blocks(&doc);
+        let Block::Bullet {
+            continuation,
+            children,
+            ..
+        } = &blocks[0]
+        else {
+            panic!("親が Bullet になる");
+        };
+        assert_eq!(continuation, &vec!["続きの段落".to_string()]);
+        assert_eq!(children.len(), 1);
+    }
+
+    #[test]
+    fn code_block_child_of_bullet_remains_a_block() {
+        let doc = Document::parse("## 理由\n\n- 親\n\n  ```python\n  x = 1\n  ```\n").unwrap();
+        let blocks = section_blocks(&doc);
+        let Block::Bullet { children, .. } = &blocks[0] else {
+            panic!("親が Bullet になる");
+        };
+        assert!(matches!(children[0], Block::Code { lang: Some(ref l), .. } if l == "python"));
+    }
+
+    #[test]
+    fn table_child_of_bullet_remains_a_block() {
+        let doc =
+            Document::parse("## 理由\n\n- 親\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n").unwrap();
+        let blocks = section_blocks(&doc);
+        let Block::Bullet { children, .. } = &blocks[0] else {
+            panic!("親が Bullet になる");
+        };
+        assert!(
+            matches!(children[0], Block::Table { ref header, .. } if header == &vec!["a".to_string(), "b".to_string()])
+        );
+    }
+
+    #[test]
+    fn statement_after_code_block_lead_is_a_statement() {
+        let doc =
+            Document::parse("## 理由\n\n- ```python\n  x = 1\n  ```\n\n  後続の段落\n").unwrap();
+        let blocks = section_blocks(&doc);
+        assert!(matches!(blocks[0], Block::Code { .. }));
+        assert!(matches!(blocks[1], Block::Statement { ref text, .. } if text == "後続の段落"));
+    }
+
+    #[test]
+    fn field_line_with_children_keeps_children() {
+        let doc = Document::parse("## 理由\n\n- 状態: 承認済み\n  - 子\n").unwrap();
+        let blocks = section_blocks(&doc);
+        let Block::Field {
+            name,
+            children,
+            line_text,
+            ..
+        } = &blocks[0]
+        else {
+            panic!("親の `- 名前: 値` 行が Field になる");
+        };
+        assert_eq!(name, "状態");
+        assert_eq!(line_text, "- 状態: 承認済み");
+        assert_eq!(children.len(), 1);
+    }
+
+    #[test]
+    fn ordered_list_item_children_are_not_attached() {
+        let doc = Document::parse("## 理由\n\n1. 順序付き\n   - 箇条書き\n").unwrap();
+        let blocks = section_blocks(&doc);
+        assert!(matches!(blocks[0], Block::OrderedList { .. }));
+        assert!(
+            matches!(blocks[1], Block::Bullet { .. }),
+            "順序付きの入れ子は対象外でトップレベルに残る"
+        );
     }
 }

@@ -233,13 +233,10 @@ fn extract_bullets(
         .iter()
         .copied()
         .filter_map(|b| {
-            if matches!(b, Block::Bullet { .. }) {
+            let is_bullet = matches!(b, Block::Bullet { .. })
+                || matches!(b, Block::Field { name, .. } if !is_declared_field(fields, name));
+            if is_bullet {
                 Some(Value::String(b.bullet_element()))
-            } else if matches!(
-                b,
-                Block::Field { name, .. } if !is_declared_field(fields, name)
-            ) {
-                Some(Value::String(b.field_element()))
             } else {
                 None
             }
@@ -356,8 +353,11 @@ fn body_from_blocks(blocks: &[Block], fields: &[Field], include_fields: bool) ->
         let (text, is_statement): (String, bool) = match block {
             Block::Statement { text, .. } => (text.clone(), true),
             Block::Bullet { .. } => (block.bullet_element(), false),
-            Block::Field { name, .. } if include_fields || !is_declared_field(fields, name) => {
+            Block::Field { name, .. } if include_fields && is_declared_field(fields, name) => {
                 (block.field_element(), false)
+            }
+            Block::Field { name, .. } if include_fields || !is_declared_field(fields, name) => {
+                (block.bullet_element(), false)
             }
             _ => continue,
         };
@@ -815,7 +815,8 @@ document:
 "#;
         let doc = "## 状況\n\n- 理由1\n\n  続きの段落\n  - 入れ子\n";
         let v = values(schema, doc);
-        assert_eq!(v["sections"]["body"], "- 理由1\n続きの段落\n- 入れ子");
+        // 子の箇条書きの行は、そのままのインデントで親の抽出要素に含める（R10）
+        assert_eq!(v["sections"]["body"], "- 理由1\n続きの段落\n  - 入れ子");
     }
 
     #[test]

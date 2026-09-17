@@ -305,13 +305,17 @@ fn push_undeclared_line(findings: &mut Vec<Finding>, block: &Block) {
 /// `Block::Bullet` と、宣言された名前と一致しない `- 名前: 値` 行（R8）が共有する。
 fn validate_bullet(
     rules: &ContainerRules,
-    text: &str,
-    line: usize,
+    block: &Block,
     blocks: &[Block],
     bullet_count: &mut u64,
     open: bool,
     findings: &mut Vec<Finding>,
 ) {
+    let (text, line) = match block {
+        Block::Bullet { text, line, .. } => (text.as_str(), *line),
+        Block::Field { text, line, .. } => (text.as_str(), *line),
+        _ => return,
+    };
     match rules.bullets {
         Some(bullets) => {
             *bullet_count += 1;
@@ -332,13 +336,20 @@ fn validate_bullet(
         }
         None => {
             if !open {
-                findings.push(Finding {
-                    kind: FindingKind::UndeclaredLine,
-                    line: Some(line),
-                    detail: format!("undeclared bullet \"{text}\""),
-                });
+                // 宣言されていない箇条書きと、その内側の子の行を undeclared_line にする。
+                // 宣言していない構造の内側の行も undeclared_line（R13）
+                push_undeclared_line(findings, block);
+                push_undeclared_children(findings, block);
             }
         }
+    }
+}
+
+/// 箇条書きの子の行を undeclared_line にする。子がさらに子を持つときも再帰する。
+fn push_undeclared_children(findings: &mut Vec<Finding>, block: &Block) {
+    for child in block.children() {
+        push_undeclared_line(findings, child);
+        push_undeclared_children(findings, child);
     }
 }
 
@@ -358,11 +369,7 @@ fn validate_container(
     for block in blocks {
         match block {
             Block::Field {
-                name,
-                value,
-                text,
-                line,
-                ..
+                name, value, line, ..
             } => {
                 match rules.fields.iter().position(|f| f.name == *name) {
                     Some(idx) => {
@@ -405,27 +412,13 @@ fn validate_container(
                     None => {
                         // R8: 宣言された名前と一致しない `- 名前: 値` 行は
                         // 箇条書きとして扱う。pattern は元の行に適用する（R10）
-                        validate_bullet(
-                            rules,
-                            text,
-                            *line,
-                            blocks,
-                            &mut bullet_count,
-                            open,
-                            findings,
-                        );
+                        validate_bullet(rules, block, blocks, &mut bullet_count, open, findings);
                     }
                 }
             }
-            Block::Bullet { text, line, .. } => validate_bullet(
-                rules,
-                text,
-                *line,
-                blocks,
-                &mut bullet_count,
-                open,
-                findings,
-            ),
+            Block::Bullet { .. } => {
+                validate_bullet(rules, block, blocks, &mut bullet_count, open, findings)
+            }
             Block::Statement { text, line } => match rules.statement {
                 Some(statement) => {
                     statement_count += 1;
@@ -925,11 +918,28 @@ document:
     }
 
     #[test]
-    fn nested_list_items_are_each_a_top_level_bullet() {
+    fn nested_list_items_are_not_counted_as_top_level_bullets() {
+        // 親の bullets の本数はトップレベルの親だけを数え、子は数えない（R10）。
         let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 2 }\n";
         let doc = "## 理由\n\n- 親\n  - 子\n";
         let findings = validate_src(schema, doc, false);
-        assert!(!kinds(&findings).contains(&FindingKind::RepeatMinNotMet));
+        assert!(
+            kinds(&findings).contains(&FindingKind::RepeatMinNotMet),
+            "子は親の本数に数えず、min: 2 が満たされない（R10）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn two_top_level_bullets_satisfy_min_two() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 2 }\n";
+        let doc = "## 理由\n\n- 親\n  - 子\n- 別\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::RepeatMinNotMet),
+            "トップレベルの親が2本あれば満たす: {:?}",
+            kinds(&findings)
+        );
     }
 
     #[test]
