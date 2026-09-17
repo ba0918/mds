@@ -9,12 +9,10 @@
 
 ## 判断待ち
 
-### ID 32: frontmatter が mapping でないときの扱い
+### ID 32: frontmatter が mapping でないときの扱い — 解決済み
 
 - 状態: 仕様 R2 に「frontmatter が YAML のマッピングでないときは frontmatter_invalid で停止」と明記済み、実装も一致
-- 残る論点: これを「許す」（スキーマなし扱いで飛ばす）に変えるか
-- 判断: あなたの例 `$schema <path>`（コロン無し）は mapping でないので停止。`$schema: <path>`（コロン有り）は通る
-- 推奨: 現状のまま（停止）で受け入れる
+- 判断（2026-09-17）: 現行が正しい。frontmatter は `field: value` の形式（マッピング）でなければ拒否する。`$schema <path>`（コロン無し）は mapping でないので停止。`$schema: <path>`（コロン有り）は通る
 
 ### ID 53: 題名より前の見出し
 
