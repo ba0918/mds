@@ -3,7 +3,9 @@
 use crate::document::{
     join_continuation, Block, Document, Item as DocItem, Section as DocSection,
 };
-use crate::schema::{Bullets, CodeBlock, Extract, Field, Schema, Statement, Table};
+use crate::schema::{
+    is_declared_field, Bullets, CodeBlock, Extract, Field, Schema, Statement, Table,
+};
 use serde_json::{Map, Value};
 
 /// `values` の出力。配置パスに沿った入れ子の JSON。
@@ -123,11 +125,6 @@ fn extract_section(def: &crate::schema::Section, document: &Document, root: &mut
             }
         }
     }
-}
-
-/// スキーマが宣言したフィールド行の名前と一致するか。R8 のフィールド行判定。
-fn is_declared_field(fields: &[Field], name: &str) -> bool {
-    fields.iter().any(|f| f.name == name)
 }
 
 fn extract_fields(fields: &[Field], blocks: &[&Block], root: &mut Map<String, Value>) {

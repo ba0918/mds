@@ -159,6 +159,11 @@ impl Field {
     }
 }
 
+/// スキーマが宣言したフィールド行の名前と一致するか。R8 のフィールド行判定。
+pub(crate) fn is_declared_field(fields: &[Field], name: &str) -> bool {
+    fields.iter().any(|f| f.name == name)
+}
+
 /// 文。R9。
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

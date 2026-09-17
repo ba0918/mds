@@ -3,8 +3,8 @@
 use crate::document::{Block, Document, Heading, Item};
 use crate::finding::{Finding, FindingKind};
 use crate::schema::{
-    Bullets, CodeBlock, Field, Item as ItemRule, Preamble, Repeat, Schema, Section, Statement,
-    Table, Title, When,
+    is_declared_field, Bullets, CodeBlock, Field, Item as ItemRule, Preamble, Repeat, Schema,
+    Section, Statement, Table, Title, When,
 };
 use std::collections::HashMap;
 
@@ -629,11 +629,6 @@ fn validate_container(
 /// 空文字列として残す（R8）。
 fn split_trimmed(value: &str, sep: &str) -> Vec<String> {
     value.split(sep).map(|s| s.trim().to_string()).collect()
-}
-
-/// スキーマが宣言したフィールド行の名前と一致するか。R8 のフィールド行判定。
-fn is_declared_field(fields: &[Field], name: &str) -> bool {
-    fields.iter().any(|f| f.name == name)
 }
 
 /// `when` の条件を評価する。参照フィールドが無いとき eq は偽、ne は真。
