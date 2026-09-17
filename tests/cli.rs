@@ -250,6 +250,31 @@ fn check_undeclared_child_under_declared_field_exits_one() {
 }
 
 #[test]
+fn check_child_bullet_when_uses_sibling_field_exits_one() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(
+        dir.path(),
+        "schema.yaml",
+        "document:\n  title:\n    pattern: \"^T-\\\\d+:\"\n  sections:\n    - name: 決定\n      bullets:\n        repeat: { min: 0 }\n        children:\n          fields:\n            - name: 種類\n          bullets:\n            repeat: { min: 0 }\n            pattern: \"^子\"\n            when: { field: 種類, eq: algorithm }\n",
+    );
+    let doc = write_file(
+        dir.path(),
+        "doc.md",
+        "---\n$schema: ./schema.yaml\n---\n# T-1: 例\n\n## 決定\n\n- 親\n  - 種類: algorithm\n  - 違反\n",
+    );
+    let output = mds()
+        .args(["check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("bullet_pattern_mismatch"),
+        "children.bullets の when が兄弟の children.fields を参照して pattern が効く: {stdout}"
+    );
+}
+
+#[test]
 fn check_skips_bom_and_counts_crlf_lines() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "schema.yaml", T_SCHEMA);

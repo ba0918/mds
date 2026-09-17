@@ -409,7 +409,13 @@ fn validate_children(block: &Block, children: Option<&Children>, findings: &mut 
             }
             // 一致しない `- 名前: 値` 行は箇条書きとして検証する（R8・R10）
             Block::Field { .. } | Block::Bullet { .. } => {
-                validate_child_bullet(child, children, &mut child_bullet_count, findings);
+                validate_child_bullet(
+                    child,
+                    children,
+                    child_blocks,
+                    &mut child_bullet_count,
+                    findings,
+                );
             }
             // 文・順序付きリスト・コードブロック・表などの子。children に規則が
             // 無いので undeclared_line（閉じた世界の対象外の行種別は無視）
@@ -457,10 +463,12 @@ fn validate_children(block: &Block, children: Option<&Children>, findings: &mut 
 
 /// 子の箇条書きを1本検証する。`children.bullets` が宣言されていれば本数を数え、
 /// pattern を照合して、さらに深い入れ子を再帰する。宣言されていなければ
-/// undeclared_line（R13）。
+/// undeclared_line（R13）。`sibling_blocks` は同じ children ノードの下の兄弟の
+/// 行で、when の探索スコープに使う（R15）。
 fn validate_child_bullet(
     block: &Block,
     children: &Children,
+    sibling_blocks: &[Block],
     bullet_count: &mut u64,
     findings: &mut Vec<Finding>,
 ) {
@@ -476,7 +484,6 @@ fn validate_child_bullet(
         Block::Field { text, line, .. } => (text.as_str(), *line),
         _ => return,
     };
-    let sibling_blocks = block.children();
     if when_allows(bullets.when.as_ref(), &children.fields, sibling_blocks) {
         if let Some(pattern) = &bullets.pattern {
             if !pattern.is_match(text) {
@@ -1190,6 +1197,33 @@ document:
         assert!(
             kinds(&findings).contains(&FindingKind::UndeclaredLine),
             "宣言済みの子フィールド行の下の子リストは undeclared_line（R13）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn child_bullet_when_references_a_sibling_field() {
+        // children.bullets の when は、同じ children ノードの下の兄弟の
+        // children.fields を参照する（R15）。when が真のときだけ pattern が効く。
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        children:
+          fields:
+            - name: 種類
+          bullets:
+            repeat: { min: 0 }
+            pattern: "^子"
+            when: { field: 種類, eq: algorithm }
+"#;
+        let doc = "## 決定\n\n- 親\n  - 種類: algorithm\n  - 違反\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::BulletPatternMismatch),
+            "children.bullets の when は兄弟の children.fields を参照する（R15）: {:?}",
             kinds(&findings)
         );
     }
