@@ -298,7 +298,7 @@ fn push_undeclared_line(findings: &mut Vec<Finding>, block: &Block) {
 /// pattern を照合する。無ければ undeclared_line（閉じた世界）。
 /// `Block::Bullet` と、宣言された名前と一致しない `- 名前: 値` 行（R8）が共有する。
 fn validate_bullet(
-    bullets: Option<&Bullets>,
+    rules: &ContainerRules,
     text: &str,
     line: usize,
     blocks: &[Block],
@@ -306,10 +306,10 @@ fn validate_bullet(
     open: bool,
     findings: &mut Vec<Finding>,
 ) {
-    match bullets {
+    match rules.bullets {
         Some(bullets) => {
             *bullet_count += 1;
-            if when_allows(bullets.when.as_ref(), blocks) {
+            if when_allows(bullets.when.as_ref(), rules.fields, blocks) {
                 if let Some(pattern) = &bullets.pattern {
                     if !pattern.is_match(text) {
                         findings.push(Finding {
@@ -363,7 +363,7 @@ fn validate_container(
                         *field_counts.entry(name.as_str()).or_insert(0) += 1;
                         ordered_seen.push((idx, *line));
                         let field = &rules.fields[idx];
-                        if when_allows(field.when.as_ref(), blocks) {
+                        if when_allows(field.when.as_ref(), rules.fields, blocks) {
                             // 区切った要素は前後の空白を取り除いてから照合する（R8）
                             let values: Vec<String> = match field.effective_separator() {
                                 Some(sep) => split_trimmed(value, sep),
@@ -400,7 +400,7 @@ fn validate_container(
                         // R8: 宣言された名前と一致しない `- 名前: 値` 行は
                         // 箇条書きとして扱う。pattern は元の行に適用する（R10）
                         validate_bullet(
-                            rules.bullets,
+                            rules,
                             text,
                             *line,
                             blocks,
@@ -412,7 +412,7 @@ fn validate_container(
                 }
             }
             Block::Bullet { text, line, .. } => validate_bullet(
-                rules.bullets,
+                rules,
                 text,
                 *line,
                 blocks,
@@ -423,7 +423,7 @@ fn validate_container(
             Block::Statement { text, line } => match rules.statement {
                 Some(statement) => {
                     statement_count += 1;
-                    if when_allows(statement.when.as_ref(), blocks) {
+                    if when_allows(statement.when.as_ref(), rules.fields, blocks) {
                         if let Some(pattern) = &statement.pattern {
                             if !pattern.is_match(text) {
                                 findings.push(Finding {
@@ -540,7 +540,7 @@ fn validate_container(
     }
 
     for field in rules.fields {
-        if when_allows(field.when.as_ref(), blocks) {
+        if when_allows(field.when.as_ref(), rules.fields, blocks) {
             let count = field_counts.get(field.name.as_str()).copied().unwrap_or(0) as u64;
             let (min, max) = bounds(field.required, field.repeat.as_ref());
             check_occurrence(
@@ -555,7 +555,7 @@ fn validate_container(
         }
     }
     if let Some(statement) = rules.statement {
-        if when_allows(statement.when.as_ref(), blocks) {
+        if when_allows(statement.when.as_ref(), rules.fields, blocks) {
             let (min, max) = bounds(statement.required, statement.repeat.as_ref());
             check_occurrence(
                 statement_count,
@@ -569,7 +569,7 @@ fn validate_container(
         }
     }
     if let Some(bullets) = rules.bullets {
-        if when_allows(bullets.when.as_ref(), blocks) {
+        if when_allows(bullets.when.as_ref(), rules.fields, blocks) {
             let (min, max) = bounds(bullets.required, bullets.repeat.as_ref());
             check_occurrence(
                 bullet_count,
@@ -631,13 +631,24 @@ fn split_trimmed(value: &str, sep: &str) -> Vec<String> {
     value.split(sep).map(|s| s.trim().to_string()).collect()
 }
 
+/// スキーマが宣言したフィールド行の名前と一致するか。R8 のフィールド行判定。
+fn is_declared_field(fields: &[Field], name: &str) -> bool {
+    fields.iter().any(|f| f.name == name)
+}
+
 /// `when` の条件を評価する。参照フィールドが無いとき eq は偽、ne は真。
-fn when_allows(when: Option<&When>, blocks: &[Block]) -> bool {
+/// 宣言された名前と一致しない `- 名前: 値` 行はフィールド行ではなく箇条書きなので、
+/// 参照フィールドとしては数えない（R8）。
+fn when_allows(when: Option<&When>, fields: &[Field], blocks: &[Block]) -> bool {
     let Some(when) = when else {
         return true;
     };
     let value = blocks.iter().find_map(|b| match b {
-        Block::Field { name, value, .. } if name == &when.field => Some(value.as_str()),
+        Block::Field { name, value, .. }
+            if name == &when.field && is_declared_field(fields, name) =>
+        {
+            Some(value.as_str())
+        }
         _ => None,
     });
     match value {
@@ -1644,5 +1655,39 @@ document:
         let doc = "## 要求\n";
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::MissingRequiredField));
+    }
+
+    #[test]
+    fn when_eq_is_false_when_reference_name_is_undeclared() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      statement:
+        required: true
+        when: { field: 種類, eq: algorithm }
+      bullets:
+        repeat: { min: 0 }
+"#;
+        let doc = "## 要求\n\n- 種類: algorithm\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(!kinds(&findings).contains(&FindingKind::MissingStatement));
+    }
+
+    #[test]
+    fn when_ne_is_true_when_reference_name_is_undeclared() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      statement:
+        required: true
+        when: { field: 種類, ne: algorithm }
+      bullets:
+        repeat: { min: 0 }
+"#;
+        let doc = "## 要求\n\n- 種類: algorithm\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(kinds(&findings).contains(&FindingKind::MissingStatement));
     }
 }
