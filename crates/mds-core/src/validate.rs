@@ -3,8 +3,8 @@
 use crate::document::{Block, Document, Heading, Item};
 use crate::finding::{Finding, FindingKind};
 use crate::schema::{
-    is_declared_field, Bullets, CodeBlock, Field, Item as ItemRule, Preamble, Repeat, Schema,
-    Section, Statement, Table, Title, When,
+    is_declared_field, Bullets, Children, CodeBlock, Field, Item as ItemRule, Preamble, Repeat,
+    Schema, Section, Statement, Table, Title, When,
 };
 use std::collections::HashMap;
 
@@ -332,6 +332,8 @@ fn validate_bullet(
                         });
                     }
                 }
+                // 親の bullets 規則が宣言されたとき、子は親の children の宣言に照合する（R13）
+                validate_children(block, bullets.children.as_ref(), findings);
             }
         }
         None => {
@@ -342,6 +344,150 @@ fn validate_bullet(
                 push_undeclared_children(findings, block);
             }
         }
+    }
+}
+
+/// 箇条書きの子の行を、親の `children` の宣言に照合する（R13・R10）。
+/// `children.fields` で宣言された名前と一致する `- 名前: 値` はフィールド行として
+/// 検証し、一致しない `- 名前: 値` は箇条書きとして検証する。`children` に宣言が
+/// 無い子、または親が `children` を持たないのに子リストがある場合は
+/// undeclared_line にする。親の bullets 規則が宣言されているので、open でも
+/// 宣言済みの構造の中の未宣言の子は undeclared_line になる（R13）。
+fn validate_children(block: &Block, children: Option<&Children>, findings: &mut Vec<Finding>) {
+    let child_blocks = block.children();
+    let Some(children) = children else {
+        push_undeclared_children(findings, block);
+        return;
+    };
+
+    let mut child_field_counts: HashMap<&str, usize> = HashMap::new();
+    let mut child_bullet_count = 0u64;
+    for child in child_blocks {
+        match child {
+            Block::Field {
+                name, value, line, ..
+            } if is_declared_field(&children.fields, name) => {
+                *child_field_counts.entry(name.as_str()).or_insert(0) += 1;
+                let field = children
+                    .fields
+                    .iter()
+                    .find(|f| f.name == *name)
+                    .expect("is_declared_field が一致を保証する");
+                if when_allows(field.when.as_ref(), &children.fields, child_blocks) {
+                    // 区切った要素は前後の空白を取り除いてから照合する（R8）
+                    let values: Vec<String> = match field.effective_separator() {
+                        Some(sep) => split_trimmed(value, sep),
+                        None => vec![value.clone()],
+                    };
+                    for v in &values {
+                        if let Some(pattern) = &field.pattern {
+                            if !pattern.is_match(v) {
+                                findings.push(Finding {
+                                    kind: FindingKind::FieldPatternMismatch,
+                                    line: Some(*line),
+                                    detail: format!(
+                                        "value \"{v}\" does not match pattern \"{}\"",
+                                        pattern.source()
+                                    ),
+                                });
+                            }
+                        }
+                        if let Some(allowed) = &field.r#enum {
+                            if !allowed.iter().any(|e| e == v) {
+                                findings.push(Finding {
+                                    kind: FindingKind::FieldEnumInvalid,
+                                    line: Some(*line),
+                                    detail: format!("value \"{v}\" is not one of {allowed:?}"),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            // 一致しない `- 名前: 値` 行は箇条書きとして検証する（R8・R10）
+            Block::Field { .. } | Block::Bullet { .. } => {
+                validate_child_bullet(child, children, &mut child_bullet_count, findings);
+            }
+            // 文・順序付きリスト・コードブロック・表などの子。children に規則が
+            // 無いので undeclared_line（閉じた世界の対象外の行種別は無視）
+            other => {
+                push_undeclared_line(findings, other);
+                push_undeclared_children(findings, other);
+            }
+        }
+    }
+
+    for field in &children.fields {
+        if when_allows(field.when.as_ref(), &children.fields, child_blocks) {
+            let count = child_field_counts
+                .get(field.name.as_str())
+                .copied()
+                .unwrap_or(0) as u64;
+            let (min, max) = bounds(field.required, field.repeat.as_ref());
+            check_occurrence(
+                count,
+                min,
+                max,
+                field.repeat.is_some(),
+                FindingKind::MissingRequiredField,
+                &format!("field \"{}\"", field.name),
+                findings,
+            );
+        }
+    }
+    // 子は親の本数には数えず、children.bullets の規則で別に数える（R10）
+    if let Some(child_bullets) = children.bullets.as_deref() {
+        if when_allows(child_bullets.when.as_ref(), &children.fields, child_blocks) {
+            let (min, max) = bounds(child_bullets.required, child_bullets.repeat.as_ref());
+            check_occurrence(
+                child_bullet_count,
+                min,
+                max,
+                child_bullets.repeat.is_some(),
+                FindingKind::MissingBullets,
+                "bullets",
+                findings,
+            );
+        }
+    }
+}
+
+/// 子の箇条書きを1本検証する。`children.bullets` が宣言されていれば本数を数え、
+/// pattern を照合して、さらに深い入れ子を再帰する。宣言されていなければ
+/// undeclared_line（R13）。
+fn validate_child_bullet(
+    block: &Block,
+    children: &Children,
+    bullet_count: &mut u64,
+    findings: &mut Vec<Finding>,
+) {
+    let Some(bullets) = children.bullets.as_deref() else {
+        // children に宣言が無い子は undeclared_line（R13）
+        push_undeclared_line(findings, block);
+        push_undeclared_children(findings, block);
+        return;
+    };
+    *bullet_count += 1;
+    let (text, line) = match block {
+        Block::Bullet { text, line, .. } => (text.as_str(), *line),
+        Block::Field { text, line, .. } => (text.as_str(), *line),
+        _ => return,
+    };
+    let sibling_blocks = block.children();
+    if when_allows(bullets.when.as_ref(), &children.fields, sibling_blocks) {
+        if let Some(pattern) = &bullets.pattern {
+            if !pattern.is_match(text) {
+                findings.push(Finding {
+                    kind: FindingKind::BulletPatternMismatch,
+                    line: Some(line),
+                    detail: format!(
+                        "bullet \"{text}\" does not match pattern \"{}\"",
+                        pattern.source()
+                    ),
+                });
+            }
+        }
+        validate_children(block, bullets.children.as_ref(), findings);
     }
 }
 
@@ -938,6 +1084,204 @@ document:
         assert!(
             !kinds(&findings).contains(&FindingKind::RepeatMinNotMet),
             "トップレベルの親が2本あれば満たす: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn declared_child_field_passes() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        children:
+          fields:
+            - name: superseded_by
+"#;
+        let doc = "## 決定\n\n- A22 判断の記録\n  - superseded_by: [A5]\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "宣言された子フィールドは通る（R10）: {:?}",
+            kinds(&findings)
+        );
+        assert!(!kinds(&findings).contains(&FindingKind::MissingRequiredField));
+    }
+
+    #[test]
+    fn undeclared_child_field_name_is_a_bullet_and_undeclared_without_rule() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        children:
+          fields:
+            - name: superseded_by
+"#;
+        let doc = "## 決定\n\n- A22 判断の記録\n  - 備考: 補足\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "一致しない `- 名前: 値` は箇条書きとして扱い、children.bullets が無いので undeclared_line（R10）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn child_list_without_children_rule_is_undeclared_line() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 0 }\n";
+        let doc = "## 理由\n\n- 親\n  - 子\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "親が children を持たないのに子リストがある場合は undeclared_line（R13）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn recursive_children_bullets_match() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        children:
+          bullets:
+            repeat: { min: 0 }
+            pattern: "^子"
+            children:
+              bullets:
+                repeat: { min: 0 }
+                pattern: "^孫"
+"#;
+        let doc = "## 理由\n\n- 親\n  - 子\n    - 孫\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::BulletPatternMismatch),
+            "再帰的な children.bullets に照合する（R10）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn recursive_children_bullets_pattern_is_enforced() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        children:
+          bullets:
+            repeat: { min: 0 }
+            pattern: "^子"
+            children:
+              bullets:
+                repeat: { min: 0 }
+                pattern: "^孫"
+"#;
+        let doc = "## 理由\n\n- 親\n  - 子\n    - 違反\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::BulletPatternMismatch),
+            "子の子の箇条書きにも children.bullets の pattern を適用する（R10）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn child_bullets_are_counted_by_children_rule_not_parent_repeat() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 1 }
+        children:
+          bullets:
+            repeat: { min: 2 }
+"#;
+        let ok = validate_src(schema, "## 理由\n\n- 親\n  - 子1\n  - 子2\n", false);
+        assert!(
+            !kinds(&ok).contains(&FindingKind::RepeatMinNotMet),
+            "親1本・子2本で両方満たす（R10）: {:?}",
+            kinds(&ok)
+        );
+        let short = validate_src(schema, "## 理由\n\n- 親\n  - 子1\n", false);
+        assert!(
+            kinds(&short).contains(&FindingKind::RepeatMinNotMet),
+            "子が1本しか無ければ children.bullets の min を満たさない（R10）: {:?}",
+            kinds(&short)
+        );
+    }
+
+    #[test]
+    fn undeclared_child_is_undeclared_even_when_open() {
+        let schema = r#"
+open: true
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        children:
+          fields:
+            - name: superseded_by
+"#;
+        let doc = "## 決定\n\n- A22 判断の記録\n  - 備考: 補足\n";
+        let findings = validate_src(schema, doc, true);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "宣言済みの構造の中の未宣言の子は open でも undeclared_line（R13）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn declared_child_field_pattern_is_enforced() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        children:
+          fields:
+            - name: superseded_by
+              pattern: "^\\["
+"#;
+        let doc = "## 決定\n\n- A22 判断の記録\n  - superseded_by: 未指定\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::FieldPatternMismatch),
+            "子フィールドの pattern は値に適用する（R8・R10）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn missing_required_child_field_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        children:
+          fields:
+            - name: superseded_by
+"#;
+        let doc = "## 決定\n\n- A22 判断の記録\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::MissingRequiredField),
+            "宣言された子フィールドが無ければ missing_required_field（R10）: {:?}",
             kinds(&findings)
         );
     }
