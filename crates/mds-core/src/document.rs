@@ -67,6 +67,9 @@ pub enum Block {
         /// マーカーを除いた元の行テキスト（`名前: 値` の原形）。箇条書きとして
         /// 扱うときの pattern はこの元の行に適用する（R10）
         text: String,
+        /// lead 段落の1行目がマーカー行にあるか。無ければ段落全体が元の行に
+        /// 無い内容として抽出要素に加わる（R10）
+        lead_on_marker_line: bool,
         name: String,
         value: String,
         /// フィールド行の子である継続段落。R8 ではフィールド行の一部として扱う
@@ -77,6 +80,9 @@ pub enum Block {
         /// 元の行（マーカーとその直後の空白を含む）。抽出の1要素に使う（R10）
         line_text: String,
         text: String,
+        /// lead 段落の1行目がマーカー行にあるか。無ければ段落全体が元の行に
+        /// 無い内容として抽出要素に加わる（R10）
+        lead_on_marker_line: bool,
         /// リスト項目の子である継続段落。R10 では箇条書きの一部として扱う
         continuation: Vec<String>,
         line: usize,
@@ -251,6 +257,7 @@ fn blocks_from_list_item(
     let mut continuation: Vec<String> = Vec::new();
     let mut extra: Vec<Block> = Vec::new();
     let mut lead_text: Option<String> = None;
+    let mut lead_on_marker_line = false;
     for (i, child) in item.children.iter().enumerate() {
         match child {
             // 先頭の段落だけがフィールド行・箇条書き・順序付き項目の lead になる。
@@ -258,6 +265,10 @@ fn blocks_from_list_item(
             Node::Paragraph(_) => {
                 let text = raw_slice(src, child);
                 if i == 0 {
+                    // 段落の1行目がマーカー行にあれば元の行が内容を持つ。
+                    // 別の行にあれば段落全体を抽出要素に加える（R10）
+                    lead_on_marker_line = item.position.as_ref().map(|p| p.start.line)
+                        == child.position().map(|p| p.start.line);
                     lead_text = Some(text);
                 } else if lead_text.is_some() {
                     continuation.push(text);
@@ -297,6 +308,7 @@ fn blocks_from_list_item(
                 Some((name, value)) => out.push(Block::Field {
                     line_text,
                     text,
+                    lead_on_marker_line,
                     name,
                     value,
                     continuation,
@@ -305,6 +317,7 @@ fn blocks_from_list_item(
                 None => out.push(Block::Bullet {
                     line_text,
                     text,
+                    lead_on_marker_line,
                     continuation,
                     line: item_line,
                 }),
@@ -329,14 +342,15 @@ fn is_image(node: &Node) -> bool {
 }
 
 /// リスト項目の元の1行目（マーカーとその直後の空白を含む）。行頭のインデントは
-/// トップレベルの箇条書きとして扱うため取り除く（R10）。
+/// トップレベルの箇条書きとして扱うため取り除く（R10）。行末の空白（ハード改行）
+/// は元の行の一部として残す
 fn original_item_line(item: &markdown::mdast::ListItem, src: &str) -> String {
     let offset = item.position.as_ref().map(|p| p.start.offset).unwrap_or(0);
     let end = src[offset..]
         .find('\n')
         .map(|i| offset + i)
         .unwrap_or(src.len());
-    src[offset..end].trim().to_string()
+    src[offset..end].trim_start().to_string()
 }
 
 /// `- 名前: 値` の形なら名前と値に分ける。形でなければ None。
@@ -357,13 +371,14 @@ impl Block {
         let Block::Bullet {
             line_text,
             text,
+            lead_on_marker_line,
             continuation,
             ..
         } = self
         else {
             return String::new();
         };
-        element_from_line(line_text, text, continuation)
+        element_from_line(line_text, text, *lead_on_marker_line, continuation)
     }
 
     /// フィールド行の抽出要素。元の行（マーカーとその直後の空白を含む）と
@@ -373,21 +388,34 @@ impl Block {
         let Block::Field {
             line_text,
             text,
+            lead_on_marker_line,
             continuation,
             ..
         } = self
         else {
             return String::new();
         };
-        element_from_line(line_text, text, continuation)
+        element_from_line(line_text, text, *lead_on_marker_line, continuation)
     }
 }
 
-/// 抽出要素を組み立てる。元の行に空行なしの折り返し行（元の行の続き）を
-/// 改行でつなぎ、続けて継続段落を改行でつなぐ（R10）。
-fn element_from_line(line_text: &str, text: &str, continuation: &[String]) -> String {
+/// 抽出要素を組み立てる。元の行（マーカーとその直後の空白を含む）に、lead 段落の
+/// うち元の行に無い内容を改行でつなぎ、続けて継続段落を改行でつなぐ（R10）。
+fn element_from_line(
+    line_text: &str,
+    text: &str,
+    lead_on_marker_line: bool,
+    continuation: &[String],
+) -> String {
     let mut out = line_text.to_string();
-    if let Some((_, rest)) = text.split_once('\n') {
+    // 段落がマーカー行に始まれば1行目は元の行が持ち、別の行に始まれば段落全体が
+    // 元の行に無い内容として加わる（R10）
+    let rest = if lead_on_marker_line {
+        text.split_once('\n').map(|(_, r)| r).unwrap_or("")
+    } else {
+        text
+    };
+    if !rest.is_empty() {
         out.push('\n');
         out.push_str(rest);
     }

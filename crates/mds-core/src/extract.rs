@@ -891,6 +891,44 @@ document:
     }
 
     #[test]
+    fn bullet_extract_includes_lead_paragraph_on_a_separate_line_from_the_marker() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n- \n  親\n- 次\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["reasons"],
+            json!(["- \n親", "- 次"]),
+            "マーカー行と別の行にある lead 段落の内容を抽出要素が欠落させない（R10）"
+        );
+    }
+
+    #[test]
+    fn bullet_extract_keeps_trailing_whitespace_of_the_marker_line() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n- 親  \n続き\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["reasons"],
+            json!(["- 親  \n続き"]),
+            "ハード改行の末尾空白がマーカー行から剥がれない（R10）"
+        );
+    }
+
+    #[test]
     fn undeclared_field_name_line_extract_preserves_whitespace_after_marker() {
         let schema = r#"
 document:
