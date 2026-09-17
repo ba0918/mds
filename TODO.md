@@ -103,3 +103,15 @@
 ## 会話メモ（U1）
 
 - 依頼時に提示された ChatGPT 共有リンク（`<redacted>`）は JS 描画のため内容を取得できなかった。メモに仕様を変える内容があれば、この TODO を参照して仕様へ反映する
+
+## 採用候補（次回向けの記録）
+
+### ox-content のパーサ（`ox_content_parser`）
+
+- 調査日: 2026-09-17。Markdown パーサの置き換え候補として調査・実験した結果
+- **性能（実測）**: Rust 製の現行 `markdown` クレートとの比較で、パースは **60〜100 倍高速**（release、全ノード走査で揃えて測定）。ただし mds の実行時間に占めるパースの割合は約 31% なので、`mds check ./` の実質的な高速化は **1.45 倍程度**。200文書（約80KB）では体感できる差は出ない
+- **品質（実測）**: CommonMark 0.31.2 の 652/652 例に完全準拠（CI で毎回検証）。ノード種類・行番号は現行 `markdown` クレートと一致（GFM の表・タスクリスト・strikethrough は `ParserOptions::gfm()` で有効化）
+- **crates.io 公開済み**: `ox_content_parser` 3.2.8。依存は最小（bumpalo, thiserror, memchr, rustc-hash, compact_str, smallvec の7つ）。Rust 1.95+ 必要（現行 toolchain 1.98 で可）
+- **置き換えのコスト（調査済み）**: `ast.rs` 書き直し（ox-content に serde が無いため `mds ast` の JSON を手書き）、`document.rs` 書き換え（Node 型差し替え・行番号ヘルパ追加）、frontmatter の切り出しを mds 側で新規実装（ox-content は frontmatter を AST ノードにしない）、インライン構造の違いへの対応
+- **判断（2026-09-17）**: 現状維持。1.45 倍の高速化のために中〜大規模の書き直しとメンテナンスリスク（頻繁な API 変更）を負う価値が薄い
+- **次回の参考**: 新規に Markdown パーサが必要なプロジェクト（または mds を大規模文書セットで使う要件が生じた場合）は、`ox_content_parser` の採用を検討する。アリーナ割当 + ゼロコピーでパースが極めて速い
