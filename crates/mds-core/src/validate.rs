@@ -403,6 +403,9 @@ fn validate_children(block: &Block, children: Option<&Children>, findings: &mut 
                         }
                     }
                 }
+                // 子フィールドも children 宣言を持たない。宣言済み子フィールド行の
+                // 下の子リストは undeclared_line（R13）
+                push_undeclared_children(findings, child);
             }
             // 一致しない `- 名前: 値` 行は箇条書きとして検証する（R8・R10）
             Block::Field { .. } | Block::Bullet { .. } => {
@@ -554,6 +557,9 @@ fn validate_container(
                                 }
                             }
                         }
+                        // フィールド行は children 宣言を持たない。宣言済みフィールド行の
+                        // 下の子リストは undeclared_line（R13）
+                        push_undeclared_children(findings, block);
                     }
                     None => {
                         // R8: 宣言された名前と一致しない `- 名前: 値` 行は
@@ -1139,6 +1145,51 @@ document:
         assert!(
             kinds(&findings).contains(&FindingKind::UndeclaredLine),
             "親が children を持たないのに子リストがある場合は undeclared_line（R13）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn child_list_under_declared_field_is_undeclared_line() {
+        // フィールド行は children 宣言を持たない。宣言済みフィールド行の下の
+        // 子リストは、閉じた世界では undeclared_line（R13）。
+        let schema = r#"
+document:
+  sections:
+    - name: 状況
+      fields:
+        - name: 状態
+      statement:
+        required: false
+"#;
+        let doc = "## 状況\n\n- 状態: 承認済み\n  - 子箇条書き\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "宣言済みフィールド行の下の子リストは undeclared_line（R13）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn child_list_under_declared_child_field_is_undeclared_line() {
+        // 子フィールド（children.fields の宣言）も children 宣言を持たない。
+        // その下の子リストは undeclared_line（R13）。
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        children:
+          fields:
+            - name: superseded_by
+"#;
+        let doc = "## 決定\n\n- A22 判断の記録\n  - superseded_by: [A5]\n    - さらに子\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "宣言済みの子フィールド行の下の子リストは undeclared_line（R13）: {:?}",
             kinds(&findings)
         );
     }

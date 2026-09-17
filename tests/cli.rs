@@ -225,6 +225,31 @@ fn check_open_relaxes_undeclared_headings() {
 }
 
 #[test]
+fn check_undeclared_child_under_declared_field_exits_one() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(
+        dir.path(),
+        "schema.yaml",
+        "document:\n  title:\n    pattern: \"^T-\\\\d+:\"\n  sections:\n    - name: 状況\n      fields:\n        - name: 状態\n      statement:\n        required: false\n",
+    );
+    let doc = write_file(
+        dir.path(),
+        "doc.md",
+        "---\n$schema: ./schema.yaml\n---\n# T-1: 例\n\n## 状況\n\n- 状態: 承認済み\n  - 子箇条書き\n",
+    );
+    let output = mds()
+        .args(["check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("undeclared_line"),
+        "宣言済みフィールド行の下の子リストは undeclared_line になる: {stdout}"
+    );
+}
+
+#[test]
 fn check_skips_bom_and_counts_crlf_lines() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "schema.yaml", T_SCHEMA);

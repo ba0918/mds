@@ -219,32 +219,32 @@ fn extract_bullets(
     let Some(bullets) = bullets else {
         return;
     };
+    // 子フィールドの抽出は箇条書きの下からだけ行う。宣言済みフィールド行の下は
+    // 未宣言の構造（R13）で、そこにある子フィールド名の行を拾うと正当な子
+    // フィールドの値を覆い隠す。宣言された名前と一致しない `- 名前: 値` 行は
+    // 箇条書きとして扱う（R8）。
+    let bullet_blocks: Vec<&Block> = blocks
+        .iter()
+        .copied()
+        .filter(|b| {
+            matches!(b, Block::Bullet { .. })
+                || matches!(b, Block::Field { name, .. } if !is_declared_field(fields, name))
+        })
+        .collect();
     let Some(extract) = &bullets.extract else {
         // 子フィールドの抽出は、親の抽出が無くても子フィールド自身の extract に
         // 沿って行う（A15）
         if let Some(children) = &bullets.children {
-            extract_child_fields(children, blocks, root);
+            extract_child_fields(children, &bullet_blocks, root);
         }
         return;
     };
-    // 宣言された名前と一致しない `- 名前: 値` 行は箇条書きとして扱う（R8）。
     // 抽出要素は元のマーカー行（元のマーカーを保つ）と子の箇条書きの行を
     // そのままのインデントで含める（R10・R16）。
-    let texts: Vec<Value> = blocks
+    let texts: Vec<Value> = bullet_blocks
         .iter()
         .copied()
-        .filter_map(|b| {
-            let is_bullet = matches!(b, Block::Bullet { .. })
-                || matches!(b, Block::Field { name, .. } if !is_declared_field(fields, name));
-            if is_bullet {
-                Some(Value::String(element_with_children(
-                    b,
-                    bullets.children.as_ref(),
-                )))
-            } else {
-                None
-            }
-        })
+        .map(|b| Value::String(element_with_children(b, bullets.children.as_ref())))
         .collect();
     if texts.is_empty() {
         // 0件のときはキーを省略する（R16）
@@ -253,7 +253,7 @@ fn extract_bullets(
     place(root, extract, Value::Array(texts));
     // 子フィールドは自身の extract を持てば、その配置パスに値を出す（A15）
     if let Some(children) = &bullets.children {
-        extract_child_fields(children, blocks, root);
+        extract_child_fields(children, &bullet_blocks, root);
     }
 }
 
@@ -1343,6 +1343,32 @@ document:
         assert_eq!(
             v["superseded_by"], "[A5]",
             "子フィールドは自身の extract で配置パスに値を出す（A15）"
+        );
+    }
+
+    #[test]
+    fn child_of_declared_field_does_not_shadow_declared_child_field() {
+        // 宣言済みフィールド行の下の子は未宣言の構造（R13）なので、子フィールドの
+        // 抽出で拾わない。拾うと正当な子フィールドの値を覆い隠す。
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      fields:
+        - name: 種類
+      bullets:
+        repeat: { min: 0 }
+        extract: decisions
+        children:
+          fields:
+            - name: superseded_by
+              extract: superseded_by
+"#;
+        let doc = "## 決定\n\n- 種類: algorithm\n  - superseded_by: [余計]\n- A22 判断の記録\n  - superseded_by: [A5]\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["superseded_by"], "[A5]",
+            "宣言済みフィールド行の下の子は、宣言済みの子フィールドの値を覆い隠さない（R13）"
         );
     }
 
