@@ -1,0 +1,19 @@
+name: decision-record
+document:
+  title:
+    pattern: "^判断の記録"
+    extract: title
+  preamble:
+    statement:
+      required: false
+  sections:
+    - name: Agreements
+      bullets:
+        repeat:
+          min: 0
+        extract: decisions
+        children:
+          fields:
+            - name: superseded_by
+              required: false
+              extract: superseded_by

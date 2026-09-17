@@ -577,3 +577,38 @@ fn ir_fixture_passes_check_and_extracts_values() {
     assert!(stdout.contains("用語: 印"));
     assert!(stdout.contains("Scenario: 印を書く"));
 }
+
+#[test]
+fn decision_record_fixture_passes_check_and_extracts_values() {
+    // 判断の記録（決定の行 `- 決定1 ...` + 子の `superseded_by`）の書式を、
+    // children で宣言したスキーマで端から端まで検査・抽出する。
+    let checked = mds()
+        .args(["check", "fixtures/decision/records.md"])
+        .output()
+        .unwrap();
+    assert_eq!(checked.status.code(), Some(0), "check が通る");
+
+    let values = mds()
+        .args(["values", "fixtures/decision/records.md", "--format", "json"])
+        .output()
+        .unwrap();
+    assert_eq!(values.status.code(), Some(0));
+    let json: serde_json::Value = serde_json::from_slice(&values.stdout).unwrap();
+    assert_eq!(json["title"], "判断の記録");
+    // 決定の行の抽出要素は元の行の文字列
+    let decisions = json["decisions"].as_array().unwrap();
+    assert_eq!(decisions.len(), 2);
+    assert_eq!(
+        decisions[0],
+        serde_json::json!("- 決定1 これは実在しないダミーの決定である。判断の記録の書式を検査するためにだけ存在する")
+    );
+    assert_eq!(
+        decisions[1],
+        serde_json::json!("- 決定2 これは実在しないダミーの決定である。既定の置き場所をこの書式で表す")
+    );
+    // 子フィールド superseded_by は自身の extract で別の配置パスに値が出る
+    assert_eq!(
+        json["superseded_by"],
+        "[example-log.md#S1](./example-log.md#S1)（新しい記録は書かず、既存は残す）"
+    );
+}
