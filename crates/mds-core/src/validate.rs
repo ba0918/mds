@@ -87,8 +87,24 @@ pub fn validate(schema: &Schema, document: &Document, open: bool) -> Vec<Finding
         );
     }
 
+    // 前置部領域の深さ3の見出し。宣言済みの前置部の中の未宣言の構造は open でも
+    // undeclared_heading、その内側の行は undeclared_line にする（R13）。前置部が
+    // 未宣言のときは閉じた世界だけで同じ扱いになり、open では未宣言の構造ごと許す。
+    if doc_rule.preamble.is_some() || !open {
+        for stray in &document.stray_preamble_headings {
+            findings.push(Finding {
+                kind: FindingKind::UndeclaredHeading,
+                line: Some(stray.heading.line),
+                detail: format!("undeclared item heading \"{}\"", stray.heading.text),
+            });
+            for block in &stray.blocks {
+                push_undeclared_line(&mut findings, block);
+            }
+        }
+    }
+
     for heading in &document.stray_headings {
-        validate_stray_heading(heading, open, &mut findings);
+        validate_stray_heading(heading, &mut findings);
     }
 
     findings
@@ -178,18 +194,14 @@ fn validate_items(section: &Section, items: &[Item], findings: &mut Vec<Finding>
     );
 }
 
-fn validate_stray_heading(heading: &Heading, open: bool, findings: &mut Vec<Finding>) {
+fn validate_stray_heading(heading: &Heading, findings: &mut Vec<Finding>) {
+    // 前置部領域の深さ3の見出しは stray_preamble_headings で扱い、ここには
+    // 深さ4以上の見出しだけが来る（R13）。深さ4以上は常に heading_level_mismatch。
     if heading.depth >= 4 {
         findings.push(Finding {
             kind: FindingKind::HeadingLevelMismatch,
             line: Some(heading.line),
             detail: format!("heading at depth {} is not allowed", heading.depth),
-        });
-    } else if !open {
-        findings.push(Finding {
-            kind: FindingKind::UndeclaredHeading,
-            line: Some(heading.line),
-            detail: format!("undeclared item heading \"{}\"", heading.text),
         });
     }
 }
@@ -1041,6 +1053,40 @@ document:
         let findings = validate_src(schema, doc, true);
         assert!(kinds(&findings).contains(&FindingKind::UndeclaredHeading));
         assert!(kinds(&findings).contains(&FindingKind::UndeclaredLine));
+    }
+
+    #[test]
+    fn stray_heading_in_declared_preamble_is_undeclared_even_when_open() {
+        let schema = r#"
+document:
+  preamble:
+    statement:
+      required: false
+"#;
+        let doc = "# 題名\n\n### 補足\n\n中身。\n";
+        let findings = validate_src(schema, doc, true);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredHeading),
+            "宣言済みの前置部の中の ### 見出しは open でも undeclared_heading（R13）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn stray_heading_lines_in_declared_preamble_are_undeclared_even_when_open() {
+        let schema = r#"
+document:
+  preamble:
+    statement:
+      required: false
+"#;
+        let doc = "# 題名\n\n### 補足\n\n中身。\n";
+        let findings = validate_src(schema, doc, true);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "宣言済みの前置部の中の見出しの内側の行は open でも undeclared_line（R13）: {:?}",
+            kinds(&findings)
+        );
     }
 
     #[test]

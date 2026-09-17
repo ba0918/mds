@@ -14,6 +14,17 @@ pub struct Document {
     pub sections: Vec<Section>,
     /// 節の外に出た深さ3以上の見出し（深さ4以上は heading_level_mismatch の対象）
     pub stray_headings: Vec<Heading>,
+    /// 前置部領域（最初の節より前）に出た深さ3の見出しとその内側の行。
+    /// 宣言済みの前置部の中の未宣言の構造として、open でも undeclared_heading /
+    /// undeclared_line の対象になる（R13）
+    pub stray_preamble_headings: Vec<StrayPreambleHeading>,
+}
+
+/// 前置部領域に出た深さ3の見出しと、その下に続く内側の行。
+#[derive(Debug)]
+pub struct StrayPreambleHeading {
+    pub heading: Heading,
+    pub blocks: Vec<Block>,
 }
 
 #[derive(Debug)]
@@ -99,6 +110,7 @@ impl Document {
     let mut doc = Document::default();
     let mut current_section: Option<usize> = None;
     let mut current_item: Option<usize> = None;
+    let mut current_stray: Option<usize> = None;
 
     for child in root.children {
         let line = child.position().map(|p| p.start.line).unwrap_or(1);
@@ -107,7 +119,10 @@ impl Document {
             Node::Heading(h) => {
                 let text = inline_text(&h.children);
                 match h.depth {
-                    1 => doc.titles.push(Heading { text, depth: 1, line }),
+                    1 => {
+                        doc.titles.push(Heading { text, depth: 1, line });
+                        current_stray = None;
+                    }
                     2 => {
                         doc.sections.push(Section {
                             name: text,
@@ -117,6 +132,7 @@ impl Document {
                         });
                         current_section = Some(doc.sections.len() - 1);
                         current_item = None;
+                        current_stray = None;
                     }
                     3 => match current_section {
                         Some(sec_idx) => {
@@ -131,9 +147,14 @@ impl Document {
                             });
                             current_item = Some(section.items.len() - 1);
                         }
-                        None => doc
-                            .stray_headings
-                            .push(Heading { text, depth: 3, line }),
+                        None => {
+                            // 前置部領域の深さ3の見出し。内側の行をここに集める（R13）
+                            doc.stray_preamble_headings.push(StrayPreambleHeading {
+                                heading: Heading { text, depth: 3, line },
+                                blocks: Vec::new(),
+                            });
+                            current_stray = Some(doc.stray_preamble_headings.len() - 1);
+                        }
                     },
                     depth => doc.stray_headings.push(Heading { text, depth, line }),
                 }
@@ -145,6 +166,8 @@ impl Document {
                     section.items[item_idx].blocks.extend(blocks);
                 } else if let Some(sec_idx) = current_section {
                     doc.sections[sec_idx].blocks.extend(blocks);
+                } else if let Some(stray_idx) = current_stray {
+                    doc.stray_preamble_headings[stray_idx].blocks.extend(blocks);
                 } else {
                     doc.preamble.extend(blocks);
                 }
