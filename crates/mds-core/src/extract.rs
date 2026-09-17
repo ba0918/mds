@@ -223,7 +223,7 @@ fn extract_bullets(
         return;
     };
     // 宣言された名前と一致しない `- 名前: 値` 行は箇条書きとして扱う（R8）。
-    // フィールド行の抽出要素（`- 名前: 値`）を箇条書きの要素として使う。
+    // 抽出要素は元のマーカー行（元のマーカーを保つ）を使う（R10）。
     let texts: Vec<Value> = blocks
         .iter()
         .copied()
@@ -559,6 +559,46 @@ document:
             v["sections"]["body"],
             "- 判断の記録かどうかの見分け（A134: 決定の節の見出しを1つ以上持つファイル）",
             "節の本文はフィールド行を含めず、箇条書きとして含める（R16）"
+        );
+    }
+
+    #[test]
+    fn undeclared_field_name_line_extract_preserves_original_marker() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n* 判断の記録（A134: 決定の節）\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["reasons"],
+            json!(["* 判断の記録（A134: 決定の節）"]),
+            "未宣言の名前の `* 名前: 値` 行は元のマーカーを保って箇条書きとして抽出する（R10）"
+        );
+    }
+
+    #[test]
+    fn section_body_includes_undeclared_field_name_line_with_original_marker() {
+        let schema = r#"
+document:
+  sections:
+    - name: 状況
+      extract: sections.body
+      statement:
+        required: false
+      bullets:
+        repeat: { min: 0 }
+"#;
+        let doc = "## 状況\n\n* 判断の記録（A134: 決定の節）\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["sections"]["body"],
+            "* 判断の記録（A134: 決定の節）",
+            "節の本文の箇条書き要素は元のマーカーを保つ（R16）"
         );
     }
 

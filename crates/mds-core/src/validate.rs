@@ -351,7 +351,13 @@ fn validate_container(
 
     for block in blocks {
         match block {
-            Block::Field { name, value, line, .. } => {
+            Block::Field {
+                name,
+                value,
+                text,
+                line,
+                ..
+            } => {
                 match rules.fields.iter().position(|f| f.name == *name) {
                     Some(idx) => {
                         *field_counts.entry(name.as_str()).or_insert(0) += 1;
@@ -392,11 +398,10 @@ fn validate_container(
                     }
                     None => {
                         // R8: 宣言された名前と一致しない `- 名前: 値` 行は
-                        // 箇条書きとして扱う
-                        let text = format!("{name}: {value}");
+                        // 箇条書きとして扱う。pattern は元の行に適用する（R10）
                         validate_bullet(
                             rules.bullets,
-                            &text,
+                            text,
                             *line,
                             blocks,
                             &mut bullet_count,
@@ -1019,6 +1024,18 @@ document:
         assert!(
             kinds(&findings).contains(&FindingKind::BulletPatternMismatch),
             "箇条書きとして pattern を適用する（R10）"
+        );
+    }
+
+    #[test]
+    fn undeclared_field_name_line_matches_bullet_pattern_on_original_text() {
+        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        repeat: { min: 0 }\n        pattern: \"^名前:値$\"\n";
+        let doc = "## 理由\n\n- 名前:値\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::BulletPatternMismatch),
+            "pattern は元の行に適用する（R10）: {:?}",
+            kinds(&findings)
         );
     }
 

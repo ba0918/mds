@@ -58,6 +58,12 @@ pub struct Item {
 #[derive(Debug)]
 pub enum Block {
     Field {
+        /// 行頭のマーカー（`-`、`*`、`+` のいずれか）。未宣言の名前の行を
+        /// 箇条書きとして扱うとき、元のマーカーを保つ（R10）
+        marker: char,
+        /// マーカーを除いた元の行テキスト（`名前: 値` の原形）。箇条書きとして
+        /// 扱うときの pattern はこの元の行に適用する（R10）
+        text: String,
         name: String,
         value: String,
         /// フィールド行の子である継続段落。R8 ではフィールド行の一部として扱う
@@ -283,6 +289,8 @@ fn blocks_from_list_item(
         } else {
             match split_field(&text) {
                 Some((name, value)) => out.push(Block::Field {
+                    marker: list_item_marker(item, src),
+                    text,
                     name,
                     value,
                     continuation,
@@ -354,19 +362,20 @@ impl Block {
         out
     }
 
-    /// フィールド行の抽出要素。`- 名前: 値` の行と継続段落を改行でつなぐ。
-    /// 継続段落が複数のときは継続段落どうしを空行でつなぐ（R8・R16）。
+    /// フィールド行の抽出要素。元のマーカー行（元のマーカーと元の行テキストを
+    /// 保つ）と継続段落を改行でつなぐ。継続段落が複数のときは継続段落どうしを
+    /// 空行でつなぐ（R8・R10・R16）。
     pub fn field_element(&self) -> String {
         let Block::Field {
-            name,
-            value,
+            marker,
+            text,
             continuation,
             ..
         } = self
         else {
             return String::new();
         };
-        let mut out = format!("- {name}: {value}");
+        let mut out = format!("{marker} {text}");
         join_continuation(&mut out, continuation);
         out
     }
