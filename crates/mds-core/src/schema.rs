@@ -311,7 +311,7 @@ fn validate_title(title: &Title) -> Result<(), SchemaError> {
 fn validate_preamble(preamble: &Preamble) -> Result<(), SchemaError> {
     validate_fields(&preamble.fields)?;
     validate_statement(preamble.statement.as_ref())?;
-    validate_bullets(preamble.bullets.as_ref(), false)?;
+    validate_bullets(preamble.bullets.as_ref(), false, false)?;
     Ok(())
 }
 
@@ -322,7 +322,7 @@ fn validate_section(section: &Section) -> Result<(), SchemaError> {
     reject_capture_extract(section.extract.as_ref(), "section")?;
     validate_fields(&section.fields)?;
     validate_statement(section.statement.as_ref())?;
-    validate_bullets(section.bullets.as_ref(), false)?;
+    validate_bullets(section.bullets.as_ref(), false, false)?;
     if let Some(table) = &section.table {
         if let Some(repeat) = &table.repeat {
             repeat.validate()?;
@@ -365,7 +365,7 @@ fn validate_item(item: &Item) -> Result<(), SchemaError> {
     }
     validate_fields(&item.fields)?;
     validate_statement(item.statement.as_ref())?;
-    validate_bullets(item.bullets.as_ref(), false)?;
+    validate_bullets(item.bullets.as_ref(), false, true)?;
     Ok(())
 }
 
@@ -395,7 +395,11 @@ fn validate_statement(statement: Option<&Statement>) -> Result<(), SchemaError> 
     Ok(())
 }
 
-fn validate_bullets(bullets: Option<&Bullets>, in_children: bool) -> Result<(), SchemaError> {
+fn validate_bullets(
+    bullets: Option<&Bullets>,
+    in_children: bool,
+    forbid_child_field_extract: bool,
+) -> Result<(), SchemaError> {
     if let Some(bullets) = bullets {
         if in_children && bullets.extract.is_some() {
             return Err(SchemaError(
@@ -412,8 +416,25 @@ fn validate_bullets(bullets: Option<&Bullets>, in_children: bool) -> Result<(), 
             reject_capture_extract(bullets.extract.as_ref(), "bullets")?;
         }
         if let Some(children) = &bullets.children {
+            // 項目の内部のフィールド行には extract を宣言できない（R16）。項目の
+            // bullets の子フィールドも項目の内部なので、入れ子の深さを問わず
+            // 同じ制約を適用する
+            if forbid_child_field_extract {
+                for field in &children.fields {
+                    if field.extract.is_some() {
+                        return Err(SchemaError(format!(
+                            "item field \"{}\" cannot declare extract",
+                            field.name
+                        )));
+                    }
+                }
+            }
             validate_fields(&children.fields)?;
-            validate_bullets(children.bullets.as_deref(), true)?;
+            validate_bullets(
+                children.bullets.as_deref(),
+                true,
+                forbid_child_field_extract,
+            )?;
         }
     }
     Ok(())
@@ -657,6 +678,53 @@ document:
             extract: kind
 "#;
         assert!(parse_schema(yaml).is_err());
+    }
+
+    #[test]
+    fn item_child_field_extract_is_schema_invalid() {
+        // item の bullets.children.fields も「項目の内部のフィールド行」なので、
+        // extract を宣言すると schema_invalid（R16）。
+        let yaml = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        bullets:
+          repeat: { min: 0 }
+          children:
+            fields:
+              - name: superseded_by
+                extract: superseded_by
+"#;
+        assert!(
+            parse_schema(yaml).is_err(),
+            "item の bullets.children.fields に extract を宣言すると schema_invalid（R16）"
+        );
+    }
+
+    #[test]
+    fn item_deep_child_field_extract_is_schema_invalid() {
+        // 再帰的な入れ子（item の bullets.children.bullets.children.fields）も
+        // 項目の内部のフィールド行なので schema_invalid（R16）。
+        let yaml = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        bullets:
+          repeat: { min: 0 }
+          children:
+            bullets:
+              repeat: { min: 0 }
+              children:
+                fields:
+                  - name: 補足
+                    extract: note
+"#;
+        assert!(
+            parse_schema(yaml).is_err(),
+            "item の入れ子の子フィールドに extract を宣言すると schema_invalid（R16）"
+        );
     }
 
     #[test]

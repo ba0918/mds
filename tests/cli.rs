@@ -275,6 +275,31 @@ fn check_child_bullet_when_uses_sibling_field_exits_one() {
 }
 
 #[test]
+fn check_item_child_field_extract_stops_with_schema_invalid() {
+    let dir = tempfile::tempdir().unwrap();
+    write_file(
+        dir.path(),
+        "schema.yaml",
+        "document:\n  title:\n    pattern: \"^T-\\\\d+:\"\n  sections:\n    - name: 要求\n      item:\n        bullets:\n          repeat: { min: 0 }\n          children:\n            fields:\n              - name: superseded_by\n                extract: superseded_by\n",
+    );
+    let doc = write_file(
+        dir.path(),
+        "doc.md",
+        "---\n$schema: ./schema.yaml\n---\n# T-1: 例\n\n## 要求\n",
+    );
+    let output = mds()
+        .args(["check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("schema_invalid"),
+        "item の bullets.children.fields の extract は schema_invalid で停止する: {stderr}"
+    );
+}
+
+#[test]
 fn check_skips_bom_and_counts_crlf_lines() {
     let dir = tempfile::tempdir().unwrap();
     write_file(dir.path(), "schema.yaml", T_SCHEMA);
