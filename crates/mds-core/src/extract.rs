@@ -2,7 +2,7 @@
 
 use crate::document::{join_continuation, Block, Document, Item as DocItem, Section as DocSection};
 use crate::schema::{
-    is_declared_field, Bullets, CodeBlock, Extract, Field, Schema, Statement, Table,
+    is_declared_field, Bullets, Children, CodeBlock, Extract, Field, Schema, Statement, Table,
 };
 use serde_json::{Map, Value};
 
@@ -94,16 +94,12 @@ fn extract_section(
             if !occurrences.is_empty() {
                 let bodies: Vec<Value> = occurrences
                     .iter()
-                    .map(|s| Value::String(section_body(s, &def.fields)))
+                    .map(|s| Value::String(section_body(s, def)))
                     .collect();
                 place(root, extract, Value::Array(bodies));
             }
         } else if let Some(section) = occurrences.first() {
-            place(
-                root,
-                extract,
-                Value::String(section_body(section, &def.fields)),
-            );
+            place(root, extract, Value::String(section_body(section, def)));
         }
     }
 
@@ -120,11 +116,10 @@ fn extract_section(
             if items.is_empty() {
                 // 0件のときはキーを省略する（R16）
             } else if item.repeat.is_some() {
-                let values: Vec<Value> =
-                    items.iter().map(|i| item_value(i, &item.fields)).collect();
+                let values: Vec<Value> = items.iter().map(|i| item_value(i, item)).collect();
                 place(root, extract, Value::Array(values));
             } else {
-                place(root, extract, item_value(items[0], &item.fields));
+                place(root, extract, item_value(items[0], item));
             }
         }
     }
@@ -225,10 +220,16 @@ fn extract_bullets(
         return;
     };
     let Some(extract) = &bullets.extract else {
+        // 子フィールドの抽出は、親の抽出が無くても子フィールド自身の extract に
+        // 沿って行う（A15）
+        if let Some(children) = &bullets.children {
+            extract_child_fields(children, blocks, root);
+        }
         return;
     };
     // 宣言された名前と一致しない `- 名前: 値` 行は箇条書きとして扱う（R8）。
-    // 抽出要素は元のマーカー行（元のマーカーを保つ）を使う（R10）。
+    // 抽出要素は元のマーカー行（元のマーカーを保つ）と子の箇条書きの行を
+    // そのままのインデントで含める（R10・R16）。
     let texts: Vec<Value> = blocks
         .iter()
         .copied()
@@ -236,7 +237,10 @@ fn extract_bullets(
             let is_bullet = matches!(b, Block::Bullet { .. })
                 || matches!(b, Block::Field { name, .. } if !is_declared_field(fields, name));
             if is_bullet {
-                Some(Value::String(b.bullet_element()))
+                Some(Value::String(element_with_children(
+                    b,
+                    bullets.children.as_ref(),
+                )))
             } else {
                 None
             }
@@ -247,6 +251,94 @@ fn extract_bullets(
         return;
     }
     place(root, extract, Value::Array(texts));
+    // 子フィールドは自身の extract を持てば、その配置パスに値を出す（A15）
+    if let Some(children) = &bullets.children {
+        extract_child_fields(children, blocks, root);
+    }
+}
+
+/// 子フィールドの抽出。`children.fields` で宣言された子フィールドのうち、自身の
+/// `extract` を持つものをその配置パスに置く（R10・R16）。さらに深い入れ子の
+/// 子フィールドは、子の箇条書きの `children` の宣言に沿って再帰する。
+fn extract_child_fields(children: &Children, blocks: &[&Block], root: &mut Map<String, Value>) {
+    for field in &children.fields {
+        if let Some(extract) = &field.extract {
+            let occurrences: Vec<&Block> = blocks
+                .iter()
+                .flat_map(|b| b.children().iter())
+                .filter(|c| matches!(c, Block::Field { name, .. } if name == &field.name))
+                .collect();
+            if occurrences.is_empty() {
+                // 0件のときはキーを省略する（R16）
+                continue;
+            }
+            let value = if field.repeat.is_some() {
+                let values: Vec<Value> =
+                    occurrences.iter().map(|b| field_single(field, b)).collect();
+                Value::Array(values)
+            } else {
+                field_single(field, occurrences[0])
+            };
+            place(root, extract, value);
+        }
+    }
+    // 子の箇条書きの下の children に再帰する。子の箇条書きは Bullet か、この
+    // レベルの宣言と一致しない `- 名前: 値` 行（箇条書きとして扱う行）である（R8）
+    if let Some(child_bullets) = children.bullets.as_deref() {
+        if let Some(grandchildren) = &child_bullets.children {
+            let declared: Vec<&str> = children.fields.iter().map(|f| f.name.as_str()).collect();
+            let bullet_blocks: Vec<&Block> = blocks
+                .iter()
+                .flat_map(|b| b.children().iter())
+                .filter(|c| {
+                    matches!(c, Block::Bullet { .. })
+                        || matches!(
+                            c,
+                            Block::Field { name, .. } if !declared.contains(&name.as_str())
+                        )
+                })
+                .collect();
+            extract_child_fields(grandchildren, &bullet_blocks, root);
+        }
+    }
+}
+
+/// 箇条書きの抽出要素を、子の箇条書きの行を含めて組み立てる（R10・R16）。
+/// 元の行、継続段落、子の箇条書きの行を改行でつなぐ。子の箇条書きの行は
+/// そのままのインデントで含める。`children` の宣言でフィールド行として宣言された
+/// 子の行は含めない（A12）。`children` が無ければ子はすべて箇条書きとして含める。
+fn element_with_children(block: &Block, children: Option<&Children>) -> String {
+    let base = match block {
+        Block::Bullet { .. } => block.bullet_element(),
+        Block::Field { .. } => block.field_element(),
+        _ => return String::new(),
+    };
+    let child_blocks = block.children();
+    if child_blocks.is_empty() {
+        return base;
+    }
+    let declared: Vec<&str> = children
+        .map(|c| c.fields.iter().map(|f| f.name.as_str()).collect())
+        .unwrap_or_default();
+    let child_rule = children.and_then(|c| c.bullets.as_deref());
+    let child_lines: Vec<String> = child_blocks
+        .iter()
+        .filter_map(|child| match child {
+            Block::Bullet { .. } => Some(element_with_children(
+                child,
+                child_rule.and_then(|b| b.children.as_ref()),
+            )),
+            Block::Field { name, .. } if !declared.contains(&name.as_str()) => Some(
+                element_with_children(child, child_rule.and_then(|b| b.children.as_ref())),
+            ),
+            _ => None,
+        })
+        .collect();
+    if child_lines.is_empty() {
+        base
+    } else {
+        base + "\n" + &child_lines.join("\n")
+    }
 }
 
 fn extract_table(table: Option<&Table>, blocks: &[&Block], root: &mut Map<String, Value>) {
@@ -323,17 +415,22 @@ fn extract_codeblock(
     place(root, extract, value);
 }
 
-fn section_body(section: &DocSection, fields: &[Field]) -> String {
-    body_from_blocks(&section.blocks, fields, false)
+fn section_body(section: &DocSection, def: &crate::schema::Section) -> String {
+    body_from_blocks(&section.blocks, &def.fields, def.bullets.as_ref(), false)
 }
 
-fn item_value(item: &DocItem, fields: &[Field]) -> Value {
+fn item_value(item: &DocItem, item_rule: &crate::schema::Item) -> Value {
     let heading = if item.title.is_empty() {
         item.id.clone()
     } else {
         format!("{}: {}", item.id, item.title)
     };
-    let body = body_from_blocks(&item.blocks, fields, true);
+    let body = body_from_blocks(
+        &item.blocks,
+        &item_rule.fields,
+        item_rule.bullets.as_ref(),
+        true,
+    );
     if body.is_empty() {
         Value::String(heading)
     } else {
@@ -344,21 +441,31 @@ fn item_value(item: &DocItem, fields: &[Field]) -> Value {
 /// 本文を組み立てる。文と箇条書き（必要ならフィールド行も）を含み、
 /// 表・コードブロック・項目は含めない。文どうしは空行、それ以外の
 /// 隣接（文と箇条書き・文とフィールド行・箇条書きどうしなど）は改行で
-/// つなぐ。箇条書きは R10 の抽出要素（継続段落を含む文字列）を使う。
-/// 宣言された名前と一致しない `- 名前: 値` 行は箇条書きとして本文に含める（R8）。
-fn body_from_blocks(blocks: &[Block], fields: &[Field], include_fields: bool) -> String {
+/// つなぐ。箇条書きは R10 の抽出要素（継続段落と子の箇条書きの行を含む
+/// 文字列）を使う。宣言された名前と一致しない `- 名前: 値` 行は箇条書きとして
+/// 本文に含める（R8）。
+fn body_from_blocks(
+    blocks: &[Block],
+    fields: &[Field],
+    bullets: Option<&Bullets>,
+    include_fields: bool,
+) -> String {
     let mut out = String::new();
     let mut last_was_statement = false;
     for block in blocks {
         let (text, is_statement): (String, bool) = match block {
             Block::Statement { text, .. } => (text.clone(), true),
-            Block::Bullet { .. } => (block.bullet_element(), false),
+            Block::Bullet { .. } => (
+                element_with_children(block, bullets.and_then(|b| b.children.as_ref())),
+                false,
+            ),
             Block::Field { name, .. } if include_fields && is_declared_field(fields, name) => {
                 (block.field_element(), false)
             }
-            Block::Field { name, .. } if include_fields || !is_declared_field(fields, name) => {
-                (block.bullet_element(), false)
-            }
+            Block::Field { name, .. } if include_fields || !is_declared_field(fields, name) => (
+                element_with_children(block, bullets.and_then(|b| b.children.as_ref())),
+                false,
+            ),
             _ => continue,
         };
         if !out.is_empty() {
@@ -1166,5 +1273,173 @@ document:
         let v = typed(schema, "# 題名\n");
         assert!(v.get("type").is_none());
         assert_eq!(v["title"], "題名");
+    }
+
+    #[test]
+    fn parent_bullet_element_includes_child_bullet_lines_with_indentation() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        extract: decisions
+        children:
+          bullets:
+            repeat: { min: 0 }
+"#;
+        let doc = "## 決定\n\n- A22 判断の記録\n  - 補足の子\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["decisions"],
+            json!(["- A22 判断の記録\n  - 補足の子"]),
+            "親の抽出要素に子の箇条書きの行をそのままのインデントで含める（R10・R16）"
+        );
+    }
+
+    #[test]
+    fn declared_child_field_is_excluded_from_the_parent_element() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        extract: decisions
+        children:
+          fields:
+            - name: superseded_by
+"#;
+        let doc = "## 決定\n\n- A22 判断の記録\n  - superseded_by: [A5]\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["decisions"],
+            json!(["- A22 判断の記録"]),
+            "子フィールド行は親の抽出要素に含めない（A12）"
+        );
+    }
+
+    #[test]
+    fn child_field_with_own_extract_is_placed_at_its_path() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        extract: decisions
+        children:
+          fields:
+            - name: superseded_by
+              extract: superseded_by
+"#;
+        let doc = "## 決定\n\n- A22 判断の記録\n  - superseded_by: [A5]\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["decisions"],
+            json!(["- A22 判断の記録"]),
+            "子フィールド行は親の抽出要素に含めない（A12）"
+        );
+        assert_eq!(
+            v["superseded_by"], "[A5]",
+            "子フィールドは自身の extract で配置パスに値を出す（A15）"
+        );
+    }
+
+    #[test]
+    fn recursive_nesting_is_included_in_the_parent_element() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        extract: decisions
+        children:
+          bullets:
+            repeat: { min: 0 }
+            children:
+              bullets:
+                repeat: { min: 0 }
+"#;
+        let doc = "## 決定\n\n- 親\n  - 子\n    - 孫\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["decisions"],
+            json!(["- 親\n  - 子\n    - 孫"]),
+            "再帰的な入れ子が親の抽出要素に含まれる（R16）"
+        );
+    }
+
+    #[test]
+    fn section_body_includes_child_bullet_lines() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      extract: sections.body
+      bullets:
+        repeat: { min: 0 }
+        children:
+          bullets:
+            repeat: { min: 0 }
+"#;
+        let doc = "## 決定\n\n- 親\n  - 子\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["sections"]["body"], "- 親\n  - 子",
+            "節の本文は子の箇条書きの行を含む（R16）"
+        );
+    }
+
+    #[test]
+    fn item_body_includes_child_bullet_lines() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        repeat: { min: 0 }
+        extract: items
+        bullets:
+          repeat: { min: 0 }
+"#;
+        let doc = "## 要求\n\n### REQ-001: 名前\n\n- 親\n  - 子\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["items"],
+            json!(["REQ-001: 名前\n- 親\n  - 子"]),
+            "項目の本文は子の箇条書きの行を含む（R16）"
+        );
+    }
+
+    #[test]
+    fn deep_child_field_extract_is_placed_at_its_path() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        extract: decisions
+        children:
+          bullets:
+            repeat: { min: 0 }
+            children:
+              fields:
+                - name: 補足
+                  extract: notes
+"#;
+        let doc = "## 決定\n\n- 親\n  - 子\n    - 補足: 深い\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["decisions"],
+            json!(["- 親\n  - 子"]),
+            "深いレベルの宣言された子フィールドも親の抽出要素に含めない（R10）"
+        );
+        assert_eq!(
+            v["notes"], "深い",
+            "深いレベルの子フィールドも自身の extract で配置パスに値を出す（A15）"
+        );
     }
 }

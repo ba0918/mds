@@ -426,42 +426,22 @@ impl Block {
         }
     }
 
-    /// R10 の箇条書きの抽出要素。元の行（マーカーとその直後の空白を含む）、
-    /// 継続段落、子の箇条書きの行を改行でつなぐ。継続段落が複数のときは
-    /// 継続段落どうしを空行でつなぐ。子の箇条書きの行は、そのままのインデントで
-    /// 含める。`- 名前: 値` 行を箇条書きとして扱うときも同じ要素を使う（R8）。
+    /// R10 の箇条書きの抽出要素の基本部分。元の行（マーカーとその直後の空白を含む）
+    /// と継続段落を改行でつなぐ。継続段落が複数のときは継続段落どうしを空行で
+    /// つなぐ。子の箇条書きの行の連結は、宣言された子フィールドを除外する必要が
+    /// あるため extract 側の `element_with_children` が行う（R10・R16）。
     pub fn bullet_element(&self) -> String {
-        let (line_text, text, lead_on_marker_line, continuation) = match self {
-            Block::Bullet {
-                line_text,
-                text,
-                lead_on_marker_line,
-                continuation,
-                ..
-            }
-            | Block::Field {
-                line_text,
-                text,
-                lead_on_marker_line,
-                continuation,
-                ..
-            } => (line_text, text, *lead_on_marker_line, continuation),
-            _ => return String::new(),
+        let Block::Bullet {
+            line_text,
+            text,
+            lead_on_marker_line,
+            continuation,
+            ..
+        } = self
+        else {
+            return String::new();
         };
-        let mut out = element_from_line(line_text, text, lead_on_marker_line, continuation);
-        let child_lines: Vec<String> = self
-            .children()
-            .iter()
-            .filter_map(|child| match child {
-                Block::Bullet { .. } | Block::Field { .. } => Some(child.bullet_element()),
-                _ => None,
-            })
-            .collect();
-        if !child_lines.is_empty() {
-            out.push('\n');
-            out.push_str(&child_lines.join("\n"));
-        }
-        out
+        element_from_line(line_text, text, *lead_on_marker_line, continuation)
     }
 
     /// フィールド行の抽出要素。元の行（マーカーとその直後の空白を含む）と
