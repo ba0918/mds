@@ -34,6 +34,8 @@ delegates to `lefthook run pre-commit --no-auto-install` (as on the developer ma
 with mise): installing would replace that global hook. Which case applies can be determined by
 checking `.git/hooks/pre-commit` for a delegation to `lefthook run pre-commit --no-auto-install`.
 On a machine without such a global hook, run `lefthook install` once to generate the local hooks.
+With nothing staged, the gates are skipped and the run reports success, so run it with at least
+one staged change to actually verify the gates.
 
 ## Conventions specific to this project
 
