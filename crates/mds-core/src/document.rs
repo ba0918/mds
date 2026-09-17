@@ -15,8 +15,9 @@ pub struct Document {
     /// 節の外に出た深さ3以上の見出し（深さ4以上は heading_level_mismatch の対象）
     pub stray_headings: Vec<Heading>,
     /// 前置部領域（最初の節より前）に出た深さ3の見出しとその内側の行。
-    /// 宣言済みの前置部の中の未宣言の構造として、open でも undeclared_heading /
-    /// undeclared_line の対象になる（R13）
+    /// 題名より後の見出しは宣言済みの前置部の中の未宣言の構造として、open でも
+    /// undeclared_heading / undeclared_line の対象になる（R13）。題名より前の
+    /// 見出しは open では許す
     pub stray_preamble_headings: Vec<StrayPreambleHeading>,
 }
 
@@ -25,6 +26,9 @@ pub struct Document {
 pub struct StrayPreambleHeading {
     pub heading: Heading,
     pub blocks: Vec<Block>,
+    /// 題名より前に出たか。題名より前の見出しは open では許し、前置部領域の
+    /// 見出しは宣言済みの前置部の内側の未宣言の構造として open でも誤りになる（R13）
+    pub before_title: bool,
 }
 
 #[derive(Debug)]
@@ -154,10 +158,12 @@ impl Document {
                             current_item = Some(section.items.len() - 1);
                         }
                         None => {
-                            // 前置部領域の深さ3の見出し。内側の行をここに集める（R13）
+                            // 前置部領域の深さ3の見出し。内側の行をここに集める（R13）。
+                            // 題名より前に出たかどうかで open の扱いが変わる（R13）
                             doc.stray_preamble_headings.push(StrayPreambleHeading {
                                 heading: Heading { text, depth: 3, line },
                                 blocks: Vec::new(),
+                                before_title: doc.titles.is_empty(),
                             });
                             current_stray = Some(doc.stray_preamble_headings.len() - 1);
                         }

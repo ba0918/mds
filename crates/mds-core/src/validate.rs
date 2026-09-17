@@ -87,11 +87,14 @@ pub fn validate(schema: &Schema, document: &Document, open: bool) -> Vec<Finding
         );
     }
 
-    // 前置部領域の深さ3の見出し。宣言済みの前置部の中の未宣言の構造は open でも
-    // undeclared_heading、その内側の行は undeclared_line にする（R13）。前置部が
-    // 未宣言のときは閉じた世界だけで同じ扱いになり、open では未宣言の構造ごと許す。
-    if doc_rule.preamble.is_some() || !open {
-        for stray in &document.stray_preamble_headings {
+    // 前置部領域の深さ3の見出し。題名より前の見出しは open では許し、閉じた
+    // 世界では undeclared_heading（R13）。題名より後の見出しは宣言済みの前置部の
+    // 中の未宣言の構造として open でも undeclared_heading、その内側の行は
+    // undeclared_line にする（R13）。前置部が未宣言のときは閉じた世界だけで
+    // 同じ扱いになり、open では未宣言の構造ごと許す。
+    for stray in &document.stray_preamble_headings {
+        let in_declared_preamble = !stray.before_title && doc_rule.preamble.is_some();
+        if in_declared_preamble || !open {
             findings.push(Finding {
                 kind: FindingKind::UndeclaredHeading,
                 line: Some(stray.heading.line),
@@ -1179,6 +1182,50 @@ document:
         assert!(
             kinds(&findings).contains(&FindingKind::UndeclaredLine),
             "宣言済みの前置部の中の見出しの内側の行は open でも undeclared_line（R13）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn stray_heading_before_title_is_allowed_when_open() {
+        let schema = r#"
+document:
+  preamble:
+    statement:
+      required: false
+"#;
+        let doc = "### 前置\n\n補足。\n\n# 題名\n";
+        let findings = validate_src(schema, doc, true);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::UndeclaredHeading),
+            "題名より前の見出しは open では許す（R13）: {:?}",
+            kinds(&findings)
+        );
+        assert!(
+            !kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "題名より前の見出しの内側の行も open では許す（R13）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn stray_heading_before_title_is_undeclared_in_closed_world() {
+        let schema = r#"
+document:
+  preamble:
+    statement:
+      required: false
+"#;
+        let doc = "### 前置\n\n補足。\n\n# 題名\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredHeading),
+            "題名より前の見出しは閉じた世界で undeclared_heading（R13）: {:?}",
+            kinds(&findings)
+        );
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "題名より前の見出しの内側の行は閉じた世界で undeclared_line（R13）: {:?}",
             kinds(&findings)
         );
     }
