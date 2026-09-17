@@ -332,9 +332,10 @@ fn validate_bullet(
                         });
                     }
                 }
-                // 親の bullets 規則が宣言されたとき、子は親の children の宣言に照合する（R13）
-                validate_children(block, bullets.children.as_ref(), findings);
             }
+            // 親の bullets 規則が宣言されたとき、子は親の children の宣言に照合する（R13）。
+            // when は required / pattern / enum の制約にだけ効く（R15）。照合は常に実行する。
+            validate_children(block, bullets.children.as_ref(), findings);
         }
         None => {
             if !open {
@@ -497,8 +498,8 @@ fn validate_child_bullet(
                 });
             }
         }
-        validate_children(block, bullets.children.as_ref(), findings);
     }
+    validate_children(block, bullets.children.as_ref(), findings);
 }
 
 /// 箇条書きの子の行を undeclared_line にする。子がさらに子を持つときも再帰する。
@@ -1224,6 +1225,57 @@ document:
         assert!(
             kinds(&findings).contains(&FindingKind::BulletPatternMismatch),
             "children.bullets の when は兄弟の children.fields を参照する（R15）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn children_are_validated_when_parent_bullets_when_is_true() {
+        // 親の bullets の when が真のとき、子は children の宣言に照合する（R13）。
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      fields:
+        - name: 種類
+      bullets:
+        repeat: { min: 0 }
+        when: { field: 種類, eq: algorithm }
+        children:
+          fields:
+            - name: superseded_by
+"#;
+        let doc = "## 決定\n\n- 種類: algorithm\n\n- A22 判断の記録\n  - 備考: 補足\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "when が真のとき子の未宣言行は undeclared_line（R13）: {:?}",
+            kinds(&findings)
+        );
+    }
+
+    #[test]
+    fn children_are_validated_when_parent_bullets_when_is_false() {
+        // 親の bullets の when は required / pattern / enum にだけ効く（R15）。
+        // children の照合（R13）は when の真偽に関わらず実行する。
+        let schema = r#"
+document:
+  sections:
+    - name: 決定
+      fields:
+        - name: 種類
+      bullets:
+        repeat: { min: 0 }
+        when: { field: 種類, eq: algorithm }
+        children:
+          fields:
+            - name: superseded_by
+"#;
+        let doc = "## 決定\n\n- 種類: other\n\n- A22 判断の記録\n  - 備考: 補足\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "親の bullets の when が偽でも子は children の宣言に照合する（R13）: {:?}",
             kinds(&findings)
         );
     }
