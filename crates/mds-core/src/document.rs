@@ -54,6 +54,8 @@ pub enum Block {
         line: usize,
     },
     Bullet {
+        /// 行頭のマーカー（`-`、`*`、`+` のいずれか）。抽出で元のマーカーを保つ（R10）
+        marker: char,
         text: String,
         /// リスト項目の子である継続段落。R10 では箇条書きの一部として扱う
         continuation: Vec<String>,
@@ -264,6 +266,7 @@ fn blocks_from_list_item(
                     line: item_line,
                 }),
                 None => out.push(Block::Bullet {
+                    marker: list_item_marker(item, src),
                     text,
                     continuation,
                     line: item_line,
@@ -288,6 +291,17 @@ fn is_image(node: &Node) -> bool {
     matches!(node, Node::Image(_))
 }
 
+/// リスト項目の行頭のマーカー。行頭の空白を除いて最初の文字（`-`、`*`、`+`）。
+/// 無順序リストの項目は必ずいずれかのマーカーで始まる（R10）。項目の位置が
+/// 取れないときは `-` を返す。
+fn list_item_marker(item: &markdown::mdast::ListItem, src: &str) -> char {
+    let offset = item.position.as_ref().map(|p| p.start.offset).unwrap_or(0);
+    src.get(offset..)
+        .and_then(|s| s.trim_start().chars().next())
+        .filter(|c| matches!(c, '-' | '*' | '+'))
+        .unwrap_or('-')
+}
+
 /// `- 名前: 値` の形なら名前と値に分ける。形でなければ None。
 fn split_field(text: &str) -> Option<(String, String)> {
     let idx = text.find(':')?;
@@ -300,10 +314,11 @@ fn split_field(text: &str) -> Option<(String, String)> {
 }
 
 impl Block {
-    /// R10 の箇条書きの抽出要素。元の `- ` 行と継続段落を改行でつなぐ。
-    /// 継続段落が複数のときは継続段落どうしを空行でつなぐ。
+    /// R10 の箇条書きの抽出要素。元のマーカー行（元のマーカーを保つ）と
+    /// 継続段落を改行でつなぐ。継続段落が複数のときは継続段落どうしを空行でつなぐ。
     pub fn bullet_element(&self) -> String {
         let Block::Bullet {
+            marker,
             text,
             continuation,
             ..
@@ -311,7 +326,7 @@ impl Block {
         else {
             return String::new();
         };
-        let mut out = format!("- {text}");
+        let mut out = format!("{marker} {text}");
         join_continuation(&mut out, continuation);
         out
     }

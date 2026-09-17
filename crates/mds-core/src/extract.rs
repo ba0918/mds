@@ -717,6 +717,44 @@ document:
     }
 
     #[test]
+    fn bullet_extract_preserves_original_markers() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n* 星\n\n+ プラス\n\n- ハイフン\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["reasons"],
+            json!(["* 星", "+ プラス", "- ハイフン"]),
+            "箇条書きの抽出は元のマーカーを保つ（R10）"
+        );
+    }
+
+    #[test]
+    fn bullet_extract_preserves_marker_with_continuation() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n* 親\n\n  続きの段落\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["reasons"],
+            json!(["* 親\n続きの段落"]),
+            "継続段落を付けるときも元のマーカーを保つ（R10）"
+        );
+    }
+
+    #[test]
     fn bullet_extract_includes_marker_and_continuation() {
         let schema = r#"
 document:
