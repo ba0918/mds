@@ -31,8 +31,9 @@ The core is kept separate from the CLI so that it can be reused, for example ins
 lefthook runs the quality gates (fmt / clippy / test) on every `pre-commit`, as defined in
 `lefthook.yml`. Do not run `lefthook install` on a machine whose global pre-commit hook already
 delegates to `lefthook run pre-commit --no-auto-install` (as on the developer machines provisioned
-with mise): installing would replace that global hook. On a machine without such a global hook,
-run `lefthook install` once to generate the local hooks.
+with mise): installing would replace that global hook. Which case applies can be determined by
+checking `.git/hooks/pre-commit` for a delegation to `lefthook run pre-commit --no-auto-install`.
+On a machine without such a global hook, run `lefthook install` once to generate the local hooks.
 
 ## Conventions specific to this project
 
