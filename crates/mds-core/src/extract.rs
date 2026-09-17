@@ -620,6 +620,25 @@ document:
     }
 
     #[test]
+    fn wrapped_line_is_part_of_value_and_subject_to_separator_split() {
+        let schema = r#"
+document:
+  preamble:
+    fields:
+      - name: タグ
+        separator: ","
+        extract: tags
+"#;
+        let doc = "# 題名\n\n- タグ: a,b\n折り返し,c\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["tags"],
+            json!(["a", "b\n折り返し", "c"]),
+            "空行なしの折り返し行は値の一部で、separator の分割対象になる（R8）。継続段落のように末尾要素に付かない"
+        );
+    }
+
+    #[test]
     fn separator_splits_value_into_string_elements() {
         let schema = r#"
 document:
