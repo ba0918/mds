@@ -101,7 +101,7 @@ pub fn frontmatter_schema(src: &str) -> Result<Option<SchemaRef>, FrontmatterErr
         Some(frontmatter) => match frontmatter.schema {
             SchemaValue::Missing => Ok(None),
             SchemaValue::Null => Err(FrontmatterError("$schema is null".into())),
-            SchemaValue::Value(value) if value.is_empty() => {
+            SchemaValue::Value(value) if value.trim().is_empty() => {
                 Err(FrontmatterError("$schema is empty".into()))
             }
             SchemaValue::Value(value) => Ok(Some(classify(value))),
@@ -201,6 +201,12 @@ mod tests {
     #[test]
     fn empty_string_schema_is_an_error() {
         let src = "---\n$schema: \"\"\n---\n# 題名\n";
+        assert!(frontmatter_schema(src).is_err());
+    }
+
+    #[test]
+    fn whitespace_only_schema_is_an_error() {
+        let src = "---\n$schema: \"   \"\n---\n# 題名\n";
         assert!(frontmatter_schema(src).is_err());
     }
 
