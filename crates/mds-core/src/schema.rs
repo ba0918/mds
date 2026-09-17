@@ -177,6 +177,16 @@ pub struct Statement {
     pub extract: Option<Extract>,
 }
 
+/// 箇条書きの子の規則。R10。
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Children {
+    #[serde(default)]
+    pub fields: Vec<Field>,
+    /// 再帰的に `children` を持つことができる（任意の深さ）
+    pub bullets: Option<Box<Bullets>>,
+}
+
 /// 箇条書き。R10。
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -186,6 +196,8 @@ pub struct Bullets {
     pub pattern: Option<Pattern>,
     pub when: Option<When>,
     pub extract: Option<Extract>,
+    /// 子の規則。子のフィールド行と箇条書きを宣言する
+    pub children: Option<Children>,
 }
 
 /// 表。R11。
@@ -299,7 +311,7 @@ fn validate_title(title: &Title) -> Result<(), SchemaError> {
 fn validate_preamble(preamble: &Preamble) -> Result<(), SchemaError> {
     validate_fields(&preamble.fields)?;
     validate_statement(preamble.statement.as_ref())?;
-    validate_bullets(preamble.bullets.as_ref())?;
+    validate_bullets(preamble.bullets.as_ref(), false)?;
     Ok(())
 }
 
@@ -310,7 +322,7 @@ fn validate_section(section: &Section) -> Result<(), SchemaError> {
     reject_capture_extract(section.extract.as_ref(), "section")?;
     validate_fields(&section.fields)?;
     validate_statement(section.statement.as_ref())?;
-    validate_bullets(section.bullets.as_ref())?;
+    validate_bullets(section.bullets.as_ref(), false)?;
     if let Some(table) = &section.table {
         if let Some(repeat) = &table.repeat {
             repeat.validate()?;
@@ -353,7 +365,7 @@ fn validate_item(item: &Item) -> Result<(), SchemaError> {
     }
     validate_fields(&item.fields)?;
     validate_statement(item.statement.as_ref())?;
-    validate_bullets(item.bullets.as_ref())?;
+    validate_bullets(item.bullets.as_ref(), false)?;
     Ok(())
 }
 
@@ -383,15 +395,26 @@ fn validate_statement(statement: Option<&Statement>) -> Result<(), SchemaError> 
     Ok(())
 }
 
-fn validate_bullets(bullets: Option<&Bullets>) -> Result<(), SchemaError> {
+fn validate_bullets(bullets: Option<&Bullets>, in_children: bool) -> Result<(), SchemaError> {
     if let Some(bullets) = bullets {
+        if in_children && bullets.extract.is_some() {
+            return Err(SchemaError(
+                "children bullets cannot declare extract".into(),
+            ));
+        }
         if let Some(repeat) = &bullets.repeat {
             repeat.validate()?;
         }
         if let Some(when) = &bullets.when {
             when.validate()?;
         }
-        reject_capture_extract(bullets.extract.as_ref(), "bullets")?;
+        if !in_children {
+            reject_capture_extract(bullets.extract.as_ref(), "bullets")?;
+        }
+        if let Some(children) = &bullets.children {
+            validate_fields(&children.fields)?;
+            validate_bullets(children.bullets.as_deref(), true)?;
+        }
     }
     Ok(())
 }
@@ -663,5 +686,125 @@ document:
     #[test]
     fn not_yaml_is_an_error() {
         assert!(parse_schema("not: [valid: yaml").is_err());
+    }
+
+    #[test]
+    fn bullets_with_children_loads() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        repeat: { min: 0 }
+        extract: decisions
+        children:
+          fields:
+            - name: superseded_by
+              extract: superseded_by
+          bullets:
+            repeat: { min: 0 }
+            children:
+              fields:
+                - name: 補足
+"#;
+        let schema = parse_schema(yaml).unwrap();
+        let bullets = schema.document.sections[0].bullets.as_ref().unwrap();
+        let children = bullets.children.as_ref().unwrap();
+        assert_eq!(children.fields[0].name, "superseded_by");
+        let child_bullets = children.bullets.as_ref().unwrap();
+        assert!(
+            child_bullets.children.as_ref().unwrap().fields[0].name == "補足",
+            "children.bullets が再帰的に children を持てる（任意の深さ）"
+        );
+    }
+
+    #[test]
+    fn item_bullets_can_have_children() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        bullets:
+          repeat: { min: 0 }
+          children:
+            fields:
+              - name: superseded_by
+"#;
+        let schema = parse_schema(yaml).unwrap();
+        let bullets = schema.document.sections[0]
+            .item
+            .as_ref()
+            .unwrap()
+            .bullets
+            .as_ref()
+            .unwrap();
+        assert!(bullets.children.is_some());
+    }
+
+    #[test]
+    fn unknown_key_under_bullets_is_an_error() {
+        let yaml = "document:\n  sections:\n    - name: 理由\n      bullets:\n        bogus: 1\n";
+        assert!(parse_schema(yaml).is_err());
+    }
+
+    #[test]
+    fn type_violation_under_children_is_an_error() {
+        let yaml = "document:\n  sections:\n    - name: 理由\n      bullets:\n        children: not-a-map\n";
+        assert!(parse_schema(yaml).is_err());
+    }
+
+    #[test]
+    fn children_bullets_with_extract_is_schema_invalid() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        children:
+          bullets:
+            extract: nested
+"#;
+        assert!(
+            parse_schema(yaml).is_err(),
+            "children.bullets に extract を宣言すると schema_invalid（R10）"
+        );
+    }
+
+    #[test]
+    fn deep_children_bullets_with_extract_is_schema_invalid() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        children:
+          bullets:
+            children:
+              bullets:
+                extract: nested
+"#;
+        assert!(
+            parse_schema(yaml).is_err(),
+            "再帰的な children.bullets にも extract を宣言できない（R10）"
+        );
+    }
+
+    #[test]
+    fn child_field_can_have_extract() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 決定
+      bullets:
+        children:
+          fields:
+            - name: superseded_by
+              extract: superseded_by
+"#;
+        assert!(
+            parse_schema(yaml).is_ok(),
+            "子フィールドは自分の extract を持つことができる（R10）"
+        );
     }
 }
