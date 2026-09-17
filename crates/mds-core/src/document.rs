@@ -122,76 +122,84 @@ impl Document {
             return Ok(Document::default());
         };
 
-    let mut doc = Document::default();
-    let mut current_section: Option<usize> = None;
-    let mut current_item: Option<usize> = None;
-    let mut current_stray: Option<usize> = None;
+        let mut doc = Document::default();
+        let mut current_section: Option<usize> = None;
+        let mut current_item: Option<usize> = None;
+        let mut current_stray: Option<usize> = None;
 
-    for child in root.children {
-        let line = child.position().map(|p| p.start.line).unwrap_or(1);
-        match child {
-            Node::Yaml(_) | Node::Toml(_) => continue,
-            Node::Heading(h) => {
-                let text = inline_text(&h.children);
-                match h.depth {
-                    1 => {
-                        doc.titles.push(Heading { text, depth: 1, line });
-                        current_stray = None;
-                    }
-                    2 => {
-                        doc.sections.push(Section {
-                            name: text,
-                            line,
-                            blocks: Vec::new(),
-                            items: Vec::new(),
-                        });
-                        current_section = Some(doc.sections.len() - 1);
-                        current_item = None;
-                        current_stray = None;
-                    }
-                    3 => match current_section {
-                        Some(sec_idx) => {
-                            let section = &mut doc.sections[sec_idx];
-                            let (id, title, has_id_separator) = split_item_heading(&text);
-                            section.items.push(Item {
-                                id,
-                                title,
-                                has_id_separator,
+        for child in root.children {
+            let line = child.position().map(|p| p.start.line).unwrap_or(1);
+            match child {
+                Node::Yaml(_) | Node::Toml(_) => continue,
+                Node::Heading(h) => {
+                    let text = inline_text(&h.children);
+                    match h.depth {
+                        1 => {
+                            doc.titles.push(Heading {
+                                text,
+                                depth: 1,
+                                line,
+                            });
+                            current_stray = None;
+                        }
+                        2 => {
+                            doc.sections.push(Section {
+                                name: text,
                                 line,
                                 blocks: Vec::new(),
+                                items: Vec::new(),
                             });
-                            current_item = Some(section.items.len() - 1);
+                            current_section = Some(doc.sections.len() - 1);
+                            current_item = None;
+                            current_stray = None;
                         }
-                        None => {
-                            // 前置部領域の深さ3の見出し。内側の行をここに集める（R13）。
-                            // 題名より前に出たかどうかで open の扱いが変わる（R13）
-                            doc.stray_preamble_headings.push(StrayPreambleHeading {
-                                heading: Heading { text, depth: 3, line },
-                                blocks: Vec::new(),
-                                before_title: doc.titles.is_empty(),
-                            });
-                            current_stray = Some(doc.stray_preamble_headings.len() - 1);
-                        }
-                    },
-                    depth => doc.stray_headings.push(Heading { text, depth, line }),
+                        3 => match current_section {
+                            Some(sec_idx) => {
+                                let section = &mut doc.sections[sec_idx];
+                                let (id, title, has_id_separator) = split_item_heading(&text);
+                                section.items.push(Item {
+                                    id,
+                                    title,
+                                    has_id_separator,
+                                    line,
+                                    blocks: Vec::new(),
+                                });
+                                current_item = Some(section.items.len() - 1);
+                            }
+                            None => {
+                                // 前置部領域の深さ3の見出し。内側の行をここに集める（R13）。
+                                // 題名より前に出たかどうかで open の扱いが変わる（R13）
+                                doc.stray_preamble_headings.push(StrayPreambleHeading {
+                                    heading: Heading {
+                                        text,
+                                        depth: 3,
+                                        line,
+                                    },
+                                    blocks: Vec::new(),
+                                    before_title: doc.titles.is_empty(),
+                                });
+                                current_stray = Some(doc.stray_preamble_headings.len() - 1);
+                            }
+                        },
+                        depth => doc.stray_headings.push(Heading { text, depth, line }),
+                    }
                 }
-            }
-            other => {
-                let blocks = blocks_from_node(&other, src);
-                if let Some(item_idx) = current_item {
-                    let section = &mut doc.sections[current_section.unwrap()];
-                    section.items[item_idx].blocks.extend(blocks);
-                } else if let Some(sec_idx) = current_section {
-                    doc.sections[sec_idx].blocks.extend(blocks);
-                } else if let Some(stray_idx) = current_stray {
-                    doc.stray_preamble_headings[stray_idx].blocks.extend(blocks);
-                } else {
-                    doc.preamble.extend(blocks);
+                other => {
+                    let blocks = blocks_from_node(&other, src);
+                    if let Some(item_idx) = current_item {
+                        let section = &mut doc.sections[current_section.unwrap()];
+                        section.items[item_idx].blocks.extend(blocks);
+                    } else if let Some(sec_idx) = current_section {
+                        doc.sections[sec_idx].blocks.extend(blocks);
+                    } else if let Some(stray_idx) = current_stray {
+                        doc.stray_preamble_headings[stray_idx].blocks.extend(blocks);
+                    } else {
+                        doc.preamble.extend(blocks);
+                    }
                 }
             }
         }
-    }
-    Ok(doc)
+        Ok(doc)
     }
 }
 
@@ -248,11 +256,7 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
 /// 先頭がコードブロック・表などで lead の段落が無いとき、後続の段落は文として
 /// 扱う（R10）。文の出現回数・規則（R9）の対象になり、閉じた世界では
 /// undeclared_line になる。
-fn blocks_from_list_item(
-    item: &markdown::mdast::ListItem,
-    src: &str,
-    ordered: bool,
-) -> Vec<Block> {
+fn blocks_from_list_item(item: &markdown::mdast::ListItem, src: &str, ordered: bool) -> Vec<Block> {
     let item_line = line_at(item.position.as_ref());
     let mut continuation: Vec<String> = Vec::new();
     let mut extra: Vec<Block> = Vec::new();

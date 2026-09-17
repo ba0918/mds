@@ -254,10 +254,7 @@ impl When {
 #[serde(untagged)]
 pub enum Extract {
     Path(String),
-    Capture {
-        path: String,
-        group: String,
-    },
+    Capture { path: String, group: String },
 }
 
 /// スキーマ YAML を型付きのモデルに読み、形の違反を `SchemaError` にする。
@@ -401,10 +398,7 @@ fn validate_bullets(bullets: Option<&Bullets>) -> Result<(), SchemaError> {
 
 /// 題名以外のノードには書式2（名前付きキャプチャ）の抽出を宣言できない（R16）。
 /// 宣言すると schema_invalid の停止になる。
-fn reject_capture_extract(
-    extract: Option<&Extract>,
-    node: &str,
-) -> Result<(), SchemaError> {
+fn reject_capture_extract(extract: Option<&Extract>, node: &str) -> Result<(), SchemaError> {
     if let Some(Extract::Capture { .. }) = extract {
         return Err(SchemaError(format!(
             "{node} extract cannot use the named-group capture form"
@@ -477,7 +471,10 @@ document:
         let item = section.item.as_ref().unwrap();
         assert_eq!(item.id.as_ref().map(|p| p.source()), Some("REQ-\\d{3,}"));
         assert_eq!(item.repeat.as_ref().unwrap().max, Some(5));
-        assert_eq!(item.fields[1].when.as_ref().unwrap().eq.as_deref(), Some("algorithm"));
+        assert_eq!(
+            item.fields[1].when.as_ref().unwrap().eq.as_deref(),
+            Some("algorithm")
+        );
     }
 
     #[test]

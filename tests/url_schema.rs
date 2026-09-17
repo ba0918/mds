@@ -68,7 +68,11 @@ fn url_schema_is_fetched_once_and_cached() {
         .args(["check", doc.to_str().unwrap()])
         .output()
         .unwrap();
-    assert_eq!(first.status.code(), Some(0), "1回目はサーバから取得して成功");
+    assert_eq!(
+        first.status.code(),
+        Some(0),
+        "1回目はサーバから取得して成功"
+    );
 
     let cache_dir = dir.path().join(".mds").join("cache");
     let entries: Vec<_> = std::fs::read_dir(&cache_dir)
@@ -85,7 +89,11 @@ fn url_schema_is_fetched_once_and_cached() {
         .output()
         .unwrap();
     assert_eq!(second.status.code(), Some(0));
-    assert_eq!(counter.load(Ordering::SeqCst), 1, "2回目はサーバに到達しない");
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "2回目はサーバに到達しない"
+    );
 }
 
 #[test]
@@ -107,7 +115,11 @@ fn url_schema_resolves_the_same_for_all_commands() {
         let output = mds().current_dir(dir.path()).args(&args).output().unwrap();
         assert_eq!(output.status.code(), Some(0), "args {args:?}");
     }
-    assert_eq!(counter.load(Ordering::SeqCst), 1, "3コマンドとも同じキャッシュを使う");
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "3コマンドとも同じキャッシュを使う"
+    );
 }
 
 #[test]
@@ -153,10 +165,21 @@ fn corrupted_cache_is_refetched_and_recovers() {
         .args(["check", doc.to_str().unwrap()])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(0), "壊れたキャッシュは再取得で回復する");
-    assert_eq!(counter.load(Ordering::SeqCst), 1, "再取得のためサーバに1回到達する");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "壊れたキャッシュは再取得で回復する"
+    );
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "再取得のためサーバに1回到達する"
+    );
     let cached = std::fs::read_to_string(&cache).unwrap();
-    assert_eq!(cached, SCHEMA_BODY, "キャッシュは取得した内容で上書きされる");
+    assert_eq!(
+        cached, SCHEMA_BODY,
+        "キャッシュは取得した内容で上書きされる"
+    );
 }
 
 #[test]
@@ -198,8 +221,7 @@ fn schema_response_over_4mib_stops() {
             let _ = stream.read(&mut buf);
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body_len,
-                body
+                body_len, body
             );
             let _ = stream.write_all(response.as_bytes());
             let _ = stream.flush();

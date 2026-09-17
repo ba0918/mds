@@ -139,11 +139,7 @@ fn run(cli: Cli) -> Result<u8, Stop> {
             }
             Ok(0)
         }
-        Command::Check {
-            path,
-            format,
-            open,
-        } => {
+        Command::Check { path, format, open } => {
             if path.is_dir() {
                 let files = check_directory(&path, open)?;
                 emit_check(&files, &format)?;
@@ -182,7 +178,10 @@ fn load_schema_and_document(path: &Path, src: &str) -> Result<(Schema, Document)
     })?;
     let schema_ref = schema_ref.ok_or_else(|| Stop {
         kind: "schema_not_found",
-        detail: format!("{}: the document has no $schema in frontmatter", path.display()),
+        detail: format!(
+            "{}: the document has no $schema in frontmatter",
+            path.display()
+        ),
     })?;
     let schema_yaml = load_schema_yaml(path, &schema_ref)?;
     let schema = mds_core::schema::parse_schema(&schema_yaml).map_err(|e| Stop {
@@ -270,7 +269,10 @@ fn cache_path(url: &str) -> PathBuf {
     let mut hasher = Sha256::new();
     hasher.update(url.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
-    base_dir().join(".mds").join("cache").join(format!("{hash}.yaml"))
+    base_dir()
+        .join(".mds")
+        .join("cache")
+        .join(format!("{hash}.yaml"))
 }
 
 fn emit_check(files: &[(PathBuf, Vec<Finding>)], format: &str) -> Result<(), Stop> {

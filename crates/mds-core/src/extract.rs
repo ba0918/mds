@@ -1,8 +1,6 @@
 //! スキーマの `extract` に沿って値を組み立てる。
 
-use crate::document::{
-    join_continuation, Block, Document, Item as DocItem, Section as DocSection,
-};
+use crate::document::{join_continuation, Block, Document, Item as DocItem, Section as DocSection};
 use crate::schema::{
     is_declared_field, Bullets, CodeBlock, Extract, Field, Schema, Statement, Table,
 };
@@ -16,7 +14,12 @@ pub fn extract_values(schema: &Schema, document: &Document) -> Value {
         let blocks: Vec<&Block> = document.preamble.iter().collect();
         extract_fields(&preamble.fields, &blocks, &mut root);
         extract_statement(preamble.statement.as_ref(), &blocks, &mut root);
-        extract_bullets(&preamble.fields, preamble.bullets.as_ref(), &blocks, &mut root);
+        extract_bullets(
+            &preamble.fields,
+            preamble.bullets.as_ref(),
+            &blocks,
+            &mut root,
+        );
     }
     for def in &schema.document.sections {
         extract_section(def, document, &mut root);
@@ -75,7 +78,11 @@ fn extract_title(schema: &Schema, document: &Document, root: &mut Map<String, Va
     place(root, extract, value);
 }
 
-fn extract_section(def: &crate::schema::Section, document: &Document, root: &mut Map<String, Value>) {
+fn extract_section(
+    def: &crate::schema::Section,
+    document: &Document,
+    root: &mut Map<String, Value>,
+) {
     let occurrences: Vec<&DocSection> = document
         .sections
         .iter()
@@ -92,14 +99,15 @@ fn extract_section(def: &crate::schema::Section, document: &Document, root: &mut
                 place(root, extract, Value::Array(bodies));
             }
         } else if let Some(section) = occurrences.first() {
-            place(root, extract, Value::String(section_body(section, &def.fields)));
+            place(
+                root,
+                extract,
+                Value::String(section_body(section, &def.fields)),
+            );
         }
     }
 
-    let blocks: Vec<&Block> = occurrences
-        .iter()
-        .flat_map(|s| s.blocks.iter())
-        .collect();
+    let blocks: Vec<&Block> = occurrences.iter().flat_map(|s| s.blocks.iter()).collect();
     extract_fields(&def.fields, &blocks, root);
     extract_statement(def.statement.as_ref(), &blocks, root);
     extract_bullets(&def.fields, def.bullets.as_ref(), &blocks, root);
@@ -108,17 +116,12 @@ fn extract_section(def: &crate::schema::Section, document: &Document, root: &mut
 
     if let Some(item) = &def.item {
         if let Some(extract) = &item.extract {
-            let items: Vec<&DocItem> = occurrences
-                .iter()
-                .flat_map(|s| s.items.iter())
-                .collect();
+            let items: Vec<&DocItem> = occurrences.iter().flat_map(|s| s.items.iter()).collect();
             if items.is_empty() {
                 // 0件のときはキーを省略する（R16）
             } else if item.repeat.is_some() {
-                let values: Vec<Value> = items
-                    .iter()
-                    .map(|i| item_value(i, &item.fields))
-                    .collect();
+                let values: Vec<Value> =
+                    items.iter().map(|i| item_value(i, &item.fields)).collect();
                 place(root, extract, Value::Array(values));
             } else {
                 place(root, extract, item_value(items[0], &item.fields));
@@ -140,7 +143,8 @@ fn extract_fields(fields: &[Field], blocks: &[&Block], root: &mut Map<String, Va
                 continue;
             }
             let value = if field.repeat.is_some() {
-                let values: Vec<Value> = occurrences.iter().map(|b| field_single(field, b)).collect();
+                let values: Vec<Value> =
+                    occurrences.iter().map(|b| field_single(field, b)).collect();
                 Value::Array(values)
             } else {
                 field_single(field, occurrences[0])
@@ -152,7 +156,11 @@ fn extract_fields(fields: &[Field], blocks: &[&Block], root: &mut Map<String, Va
 
 fn field_single(field: &Field, block: &Block) -> Value {
     let (value, continuation) = match block {
-        Block::Field { value, continuation, .. } => (value.as_str(), continuation.as_slice()),
+        Block::Field {
+            value,
+            continuation,
+            ..
+        } => (value.as_str(), continuation.as_slice()),
         _ => ("", &[][..]),
     };
     match field.effective_separator() {
@@ -244,11 +252,7 @@ fn extract_bullets(
     place(root, extract, Value::Array(texts));
 }
 
-fn extract_table(
-    table: Option<&Table>,
-    blocks: &[&Block],
-    root: &mut Map<String, Value>,
-) {
+fn extract_table(table: Option<&Table>, blocks: &[&Block], root: &mut Map<String, Value>) {
     let Some(table) = table else {
         return;
     };
@@ -352,9 +356,7 @@ fn body_from_blocks(blocks: &[Block], fields: &[Field], include_fields: bool) ->
         let (text, is_statement): (String, bool) = match block {
             Block::Statement { text, .. } => (text.clone(), true),
             Block::Bullet { .. } => (block.bullet_element(), false),
-            Block::Field { name, .. }
-                if include_fields || !is_declared_field(fields, name) =>
-            {
+            Block::Field { name, .. } if include_fields || !is_declared_field(fields, name) => {
                 (block.field_element(), false)
             }
             _ => continue,
@@ -593,8 +595,7 @@ document:
         let doc = "## 状況\n\n* 判断の記録（A134: 決定の節）\n";
         let v = values(schema, doc);
         assert_eq!(
-            v["sections"]["body"],
-            "* 判断の記録（A134: 決定の節）",
+            v["sections"]["body"], "* 判断の記録（A134: 決定の節）",
             "節の本文の箇条書き要素は元のマーカーを保つ（R16）"
         );
     }
@@ -666,7 +667,10 @@ document:
         extract: reasons
 "#;
         let v = values(schema, "## 理由\n");
-        assert!(v.get("reasons").is_none(), "箇条書き0件のときはキーを省略する");
+        assert!(
+            v.get("reasons").is_none(),
+            "箇条書き0件のときはキーを省略する"
+        );
     }
 
     #[test]
@@ -1008,8 +1012,7 @@ document:
         let doc = "# 題名\n\n- 状態: 承認済み\n\n  継続の段落\n";
         let v = values(schema, doc);
         assert_eq!(
-            v["status"],
-            "承認済み\n継続の段落",
+            v["status"], "承認済み\n継続の段落",
             "フィールド行の継続段落は値に改行でつなぐ（R8・R16）"
         );
     }
@@ -1031,7 +1034,10 @@ document:
         let doc = "## 要求\n\n### REQ-001: 名前\n\n- 種類: algorithm\n\n  継続の説明\n";
         let v = values(schema, doc);
         // 継続段落はフィールド行の一部なので、項目の本文のフィールド行にも含める（R8・R16）
-        assert_eq!(v["items"], json!(["REQ-001: 名前\n- 種類: algorithm\n継続の説明"]));
+        assert_eq!(
+            v["items"],
+            json!(["REQ-001: 名前\n- 種類: algorithm\n継続の説明"])
+        );
     }
 
     #[test]
@@ -1051,7 +1057,10 @@ document:
         let doc = "## 要求\n\n### REQ-001: 名前\n\n- 種類: algorithm\n\n本文。\n";
         let v = values(schema, doc);
         // 見出しと本文は改行でつなぎ、本文内は文どうしだけ空行でつなぐ
-        assert_eq!(v["items"], json!(["REQ-001: 名前\n- 種類: algorithm\n本文。"]));
+        assert_eq!(
+            v["items"],
+            json!(["REQ-001: 名前\n- 種類: algorithm\n本文。"])
+        );
     }
 
     #[test]
@@ -1065,9 +1074,13 @@ document:
         header: [a, b]
         extract: glossary
 "#;
-        let doc = "## 用語集\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n| a | b |\n|---|---|\n| 3 | 4 |\n";
+        let doc =
+            "## 用語集\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n| a | b |\n|---|---|\n| 3 | 4 |\n";
         let v = values(schema, doc);
-        assert_eq!(v["glossary"], json!([{ "a": "1", "b": "2" }, { "a": "3", "b": "4" }]));
+        assert_eq!(
+            v["glossary"],
+            json!([{ "a": "1", "b": "2" }, { "a": "3", "b": "4" }])
+        );
     }
 
     #[test]

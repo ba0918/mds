@@ -28,7 +28,11 @@ pub fn validate(schema: &Schema, document: &Document, open: bool) -> Vec<Finding
 
     // 宣言済みの前置部は open でも未宣言の行を誤りにする。宣言していない
     // 前置部の内側の行は閉じた世界だけで誤りにする。
-    let effective_open = if doc_rule.preamble.is_some() { false } else { open };
+    let effective_open = if doc_rule.preamble.is_some() {
+        false
+    } else {
+        open
+    };
     let rules = ContainerRules::for_preamble(doc_rule.preamble.as_ref());
     validate_container(&rules, &document.preamble, effective_open, &mut findings);
 
@@ -38,7 +42,11 @@ pub fn validate(schema: &Schema, document: &Document, open: bool) -> Vec<Finding
     }
 
     for section in &document.sections {
-        match doc_rule.sections.iter().find(|def| def.name == section.name) {
+        match doc_rule
+            .sections
+            .iter()
+            .find(|def| def.name == section.name)
+        {
             Some(def) => {
                 let rules = ContainerRules::for_section(def);
                 validate_container(&rules, &section.blocks, false, &mut findings);
@@ -71,10 +79,7 @@ pub fn validate(schema: &Schema, document: &Document, open: bool) -> Vec<Finding
     }
 
     for def in &doc_rule.sections {
-        let count = section_counts
-            .get(def.name.as_str())
-            .copied()
-            .unwrap_or(0) as u64;
+        let count = section_counts.get(def.name.as_str()).copied().unwrap_or(0) as u64;
         let (min, max) = bounds(def.required, def.repeat.as_ref());
         check_occurrence(
             count,
@@ -277,9 +282,7 @@ fn undeclared_line_for_block(block: &Block) -> Option<Finding> {
         Block::OrderedList { text, line, .. } => {
             (format!("undeclared ordered list \"{text}\""), *line)
         }
-        Block::Statement { text, line, .. } => {
-            (format!("undeclared statement \"{text}\""), *line)
-        }
+        Block::Statement { text, line, .. } => (format!("undeclared statement \"{text}\""), *line),
         Block::Table { line, .. } => ("undeclared table".to_string(), *line),
         Block::Code { line, .. } => ("undeclared code block".to_string(), *line),
         Block::Other { .. } => return None,
@@ -763,7 +766,8 @@ document:
 
     #[test]
     fn undeclared_heading_is_found() {
-        let doc = "# ADR-0001: a\n\n## 状況\n\n背景。\n\n## 決定\n\n判断。\n\n## 補足\n\n余計な節。\n";
+        let doc =
+            "# ADR-0001: a\n\n## 状況\n\n背景。\n\n## 決定\n\n判断。\n\n## 補足\n\n余計な節。\n";
         let findings = validate_src(SCHEMA, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::UndeclaredHeading));
     }
@@ -942,7 +946,8 @@ document:
 
     #[test]
     fn ordered_list_is_not_a_bullet_and_is_undeclared_in_closed_world() {
-        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        pattern: \"^親\"\n";
+        let schema =
+            "document:\n  sections:\n    - name: 理由\n      bullets:\n        pattern: \"^親\"\n";
         let doc = "## 理由\n\n1. 子\n";
         let findings = validate_src(schema, doc, false);
         assert!(
@@ -954,7 +959,8 @@ document:
 
     #[test]
     fn ordered_list_does_not_satisfy_required_bullets() {
-        let schema = "document:\n  sections:\n    - name: 理由\n      bullets:\n        required: true\n";
+        let schema =
+            "document:\n  sections:\n    - name: 理由\n      bullets:\n        required: true\n";
         let doc = "## 理由\n\n1. 順序付き\n";
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::MissingBullets));
@@ -1050,7 +1056,8 @@ document:
 
     #[test]
     fn undeclared_field_name_line_is_undeclared_when_no_bullets_declared() {
-        let schema = "document:\n  sections:\n    - name: 理由\n      statement:\n        required: false\n";
+        let schema =
+            "document:\n  sections:\n    - name: 理由\n      statement:\n        required: false\n";
         let doc = "## 理由\n\n- 判断の記録かどうかの見分け（A134: 決定の節の見出しを1つ以上持つファイル）\n";
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::UndeclaredLine));
@@ -1081,7 +1088,8 @@ document:
 
     #[test]
     fn title_without_rule_is_undeclared_heading_in_closed_world() {
-        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let schema =
+            "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
         let doc = "# 題名\n\n## 状況\n\n背景。\n";
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::UndeclaredHeading));
@@ -1089,7 +1097,8 @@ document:
 
     #[test]
     fn title_without_rule_is_allowed_when_open() {
-        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let schema =
+            "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
         let doc = "# 題名\n\n## 状況\n\n背景。\n";
         let findings = validate_src(schema, doc, true);
         assert!(!kinds(&findings).contains(&FindingKind::UndeclaredHeading));
@@ -1097,7 +1106,8 @@ document:
 
     #[test]
     fn undeclared_section_lines_are_flagged_in_closed_world() {
-        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let schema =
+            "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
         let doc = "# 題名\n\n## 状況\n\n背景。\n\n## 補足\n\n- 余計な箇条書き\n\n### 補足の項目\n\n中身。\n";
         let findings = validate_src(schema, doc, false);
         let headings = findings
@@ -1108,13 +1118,20 @@ document:
             .iter()
             .filter(|f| f.kind == FindingKind::UndeclaredLine)
             .count();
-        assert!(headings >= 2, "節と項目の見出しが undeclared_heading になる");
-        assert!(lines >= 2, "節の中の箇条書きと項目の中の行が undeclared_line になる");
+        assert!(
+            headings >= 2,
+            "節と項目の見出しが undeclared_heading になる"
+        );
+        assert!(
+            lines >= 2,
+            "節の中の箇条書きと項目の中の行が undeclared_line になる"
+        );
     }
 
     #[test]
     fn undeclared_preamble_lines_are_flagged_in_closed_world() {
-        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let schema =
+            "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
         let doc = "# 題名\n\n- 状態: 承認済み\n\n## 状況\n\n背景。\n";
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::UndeclaredLine));
@@ -1122,7 +1139,8 @@ document:
 
     #[test]
     fn undeclared_preamble_lines_are_allowed_when_open() {
-        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let schema =
+            "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
         let doc = "# 題名\n\n- 状態: 承認済み\n\n## 状況\n\n背景。\n";
         let findings = validate_src(schema, doc, true);
         assert!(!kinds(&findings).contains(&FindingKind::UndeclaredLine));
@@ -1130,7 +1148,8 @@ document:
 
     #[test]
     fn undeclared_section_lines_are_allowed_when_open() {
-        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let schema =
+            "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
         let doc = "# 題名\n\n## 状況\n\n背景。\n\n## 補足\n\n- 余計な箇条書き\n";
         let findings = validate_src(schema, doc, true);
         assert!(!kinds(&findings).contains(&FindingKind::UndeclaredHeading));
@@ -1458,7 +1477,8 @@ document:
 
     #[test]
     fn blockquote_and_thematic_break_lines_are_ignored_in_closed_world() {
-        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
+        let schema =
+            "document:\n  sections:\n    - name: 状況\n      statement:\n        required: false\n";
         let doc = "## 状況\n\n> 引用\n\n---\n\n本文。\n";
         let findings = validate_src(schema, doc, false);
         assert!(!kinds(&findings).contains(&FindingKind::UndeclaredLine));
@@ -1466,7 +1486,8 @@ document:
 
     #[test]
     fn image_only_line_is_not_counted_as_statement() {
-        let schema = "document:\n  sections:\n    - name: 状況\n      statement:\n        required: true\n";
+        let schema =
+            "document:\n  sections:\n    - name: 状況\n      statement:\n        required: true\n";
         let doc = "## 状況\n\n![alt](img.png)\n";
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::MissingStatement));
@@ -1533,7 +1554,8 @@ document:
 
     #[test]
     fn repeat_with_max_only_omits_min_as_zero() {
-        let schema = "document:\n  preamble:\n    fields:\n      - name: タグ\n        repeat: { max: 2 }\n";
+        let schema =
+            "document:\n  preamble:\n    fields:\n      - name: タグ\n        repeat: { max: 2 }\n";
         let doc = "# 題名\n";
         let findings = validate_src(schema, doc, false);
         assert!(!kinds(&findings).contains(&FindingKind::RepeatMinNotMet));

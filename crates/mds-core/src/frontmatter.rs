@@ -166,7 +166,10 @@ mod tests {
     fn reads_url_schema_ref() {
         let src = "---\n$schema: https://example.com/schema.yaml\n---\n# 題名\n";
         let ref_ = frontmatter_schema(src).unwrap().unwrap();
-        assert_eq!(ref_, SchemaRef::Url("https://example.com/schema.yaml".into()));
+        assert_eq!(
+            ref_,
+            SchemaRef::Url("https://example.com/schema.yaml".into())
+        );
     }
 
     #[test]
