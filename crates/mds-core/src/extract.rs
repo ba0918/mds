@@ -853,6 +853,63 @@ document:
     }
 
     #[test]
+    fn bullet_extract_preserves_whitespace_after_marker() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n-  親\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["reasons"],
+            json!(["-  親"]),
+            "抽出の1要素は元の行（マーカーとその直後の空白を含む）を使う（R10）"
+        );
+    }
+
+    #[test]
+    fn bullet_extract_preserves_whitespace_after_marker_with_continuation() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n-  親\n\n    続きの段落\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["reasons"],
+            json!(["-  親\n続きの段落"]),
+            "継続段落とつなぐときも元の行のマーカー直後の空白を保つ（R10）"
+        );
+    }
+
+    #[test]
+    fn undeclared_field_name_line_extract_preserves_whitespace_after_marker() {
+        let schema = r#"
+document:
+  sections:
+    - name: 理由
+      bullets:
+        repeat: { min: 0 }
+        extract: reasons
+"#;
+        let doc = "## 理由\n\n-  判断の記録（A134: 決定の節）\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["reasons"],
+            json!(["-  判断の記録（A134: 決定の節）"]),
+            "未宣言の名前の行を箇条書きとして抽出するときも元の行を使う（R8・R10）"
+        );
+    }
+
+    #[test]
     fn bullet_extract_includes_marker_and_continuation() {
         let schema = r#"
 document:

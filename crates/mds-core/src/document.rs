@@ -62,9 +62,8 @@ pub struct Item {
 #[derive(Debug)]
 pub enum Block {
     Field {
-        /// 行頭のマーカー（`-`、`*`、`+` のいずれか）。未宣言の名前の行を
-        /// 箇条書きとして扱うとき、元のマーカーを保つ（R10）
-        marker: char,
+        /// 元の行（マーカーとその直後の空白を含む）。抽出の1要素に使う（R10）
+        line_text: String,
         /// マーカーを除いた元の行テキスト（`名前: 値` の原形）。箇条書きとして
         /// 扱うときの pattern はこの元の行に適用する（R10）
         text: String,
@@ -75,8 +74,8 @@ pub enum Block {
         line: usize,
     },
     Bullet {
-        /// 行頭のマーカー（`-`、`*`、`+` のいずれか）。抽出で元のマーカーを保つ（R10）
-        marker: char,
+        /// 元の行（マーカーとその直後の空白を含む）。抽出の1要素に使う（R10）
+        line_text: String,
         text: String,
         /// リスト項目の子である継続段落。R10 では箇条書きの一部として扱う
         continuation: Vec<String>,
@@ -293,9 +292,10 @@ fn blocks_from_list_item(
                 line: item_line,
             });
         } else {
+            let line_text = original_item_line(item, src);
             match split_field(&text) {
                 Some((name, value)) => out.push(Block::Field {
-                    marker: list_item_marker(item, src),
+                    line_text,
                     text,
                     name,
                     value,
@@ -303,7 +303,7 @@ fn blocks_from_list_item(
                     line: item_line,
                 }),
                 None => out.push(Block::Bullet {
-                    marker: list_item_marker(item, src),
+                    line_text,
                     text,
                     continuation,
                     line: item_line,
@@ -328,15 +328,15 @@ fn is_image(node: &Node) -> bool {
     matches!(node, Node::Image(_))
 }
 
-/// リスト項目の行頭のマーカー。行頭の空白を除いて最初の文字（`-`、`*`、`+`）。
-/// 無順序リストの項目は必ずいずれかのマーカーで始まる（R10）。項目の位置が
-/// 取れないときは `-` を返す。
-fn list_item_marker(item: &markdown::mdast::ListItem, src: &str) -> char {
+/// リスト項目の元の1行目（マーカーとその直後の空白を含む）。行頭のインデントは
+/// トップレベルの箇条書きとして扱うため取り除く（R10）。
+fn original_item_line(item: &markdown::mdast::ListItem, src: &str) -> String {
     let offset = item.position.as_ref().map(|p| p.start.offset).unwrap_or(0);
-    src.get(offset..)
-        .and_then(|s| s.trim_start().chars().next())
-        .filter(|c| matches!(c, '-' | '*' | '+'))
-        .unwrap_or('-')
+    let end = src[offset..]
+        .find('\n')
+        .map(|i| offset + i)
+        .unwrap_or(src.len());
+    src[offset..end].trim().to_string()
 }
 
 /// `- 名前: 値` の形なら名前と値に分ける。形でなければ None。
@@ -351,11 +351,11 @@ fn split_field(text: &str) -> Option<(String, String)> {
 }
 
 impl Block {
-    /// R10 の箇条書きの抽出要素。元のマーカー行（元のマーカーを保つ）と
+    /// R10 の箇条書きの抽出要素。元の行（マーカーとその直後の空白を含む）と
     /// 継続段落を改行でつなぐ。継続段落が複数のときは継続段落どうしを空行でつなぐ。
     pub fn bullet_element(&self) -> String {
         let Block::Bullet {
-            marker,
+            line_text,
             text,
             continuation,
             ..
@@ -363,17 +363,15 @@ impl Block {
         else {
             return String::new();
         };
-        let mut out = format!("{marker} {text}");
-        join_continuation(&mut out, continuation);
-        out
+        element_from_line(line_text, text, continuation)
     }
 
-    /// フィールド行の抽出要素。元のマーカー行（元のマーカーと元の行テキストを
-    /// 保つ）と継続段落を改行でつなぐ。継続段落が複数のときは継続段落どうしを
+    /// フィールド行の抽出要素。元の行（マーカーとその直後の空白を含む）と
+    /// 継続段落を改行でつなぐ。継続段落が複数のときは継続段落どうしを
     /// 空行でつなぐ（R8・R10・R16）。
     pub fn field_element(&self) -> String {
         let Block::Field {
-            marker,
+            line_text,
             text,
             continuation,
             ..
@@ -381,10 +379,20 @@ impl Block {
         else {
             return String::new();
         };
-        let mut out = format!("{marker} {text}");
-        join_continuation(&mut out, continuation);
-        out
+        element_from_line(line_text, text, continuation)
     }
+}
+
+/// 抽出要素を組み立てる。元の行に空行なしの折り返し行（元の行の続き）を
+/// 改行でつなぎ、続けて継続段落を改行でつなぐ（R10）。
+fn element_from_line(line_text: &str, text: &str, continuation: &[String]) -> String {
+    let mut out = line_text.to_string();
+    if let Some((_, rest)) = text.split_once('\n') {
+        out.push('\n');
+        out.push_str(rest);
+    }
+    join_continuation(&mut out, continuation);
+    out
 }
 
 /// 継続段落を `- ` 行に改行で続けてつなぐ。複数あるときは空行でつなぐ（R10）。
