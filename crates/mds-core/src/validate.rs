@@ -166,7 +166,7 @@ fn validate_items(section: &Section, items: &[Item], findings: &mut Vec<Finding>
     }
 
     let count = items.len() as u64;
-    let (min, max) = item_bounds(item_rule.required, item_rule.repeat.as_ref());
+    let (min, max) = bounds(item_rule.required, item_rule.repeat.as_ref());
     check_occurrence(
         count,
         min,
@@ -604,14 +604,6 @@ fn bounds(required: Option<bool>, repeat: Option<&Repeat>) -> (u64, Option<u64>)
         (0, Some(1))
     } else {
         (1, Some(1))
-    }
-}
-
-fn item_bounds(required: Option<bool>, repeat: Option<&Repeat>) -> (u64, Option<u64>) {
-    match repeat {
-        Some(repeat) => (repeat.min.unwrap_or(0), repeat.max),
-        None if required == Some(false) => (0, Some(1)),
-        None => (1, Some(1)),
     }
 }
 
