@@ -335,7 +335,8 @@ impl Block {
 }
 
 /// 継続段落を `- ` 行に改行で続けてつなぐ。複数あるときは空行でつなぐ（R10）。
-fn join_continuation(out: &mut String, continuation: &[String]) {
+/// フィールド行と箇条書きの抽出要素が共有する結合規則。
+pub(crate) fn join_continuation(out: &mut String, continuation: &[String]) {
     if !continuation.is_empty() {
         out.push('\n');
         out.push_str(&continuation.join("\n\n"));

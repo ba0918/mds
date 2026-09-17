@@ -1,6 +1,8 @@
 //! スキーマの `extract` に沿って値を組み立てる。
 
-use crate::document::{Block, Document, Item as DocItem, Section as DocSection};
+use crate::document::{
+    join_continuation, Block, Document, Item as DocItem, Section as DocSection,
+};
 use crate::schema::{Bullets, CodeBlock, Extract, Field, Schema, Statement, Table};
 use serde_json::{Map, Value};
 
@@ -148,22 +150,24 @@ fn field_single(field: &Field, block: &Block) -> Value {
         Block::Field { value, continuation, .. } => (value.as_str(), continuation.as_slice()),
         _ => ("", &[][..]),
     };
-    // 継続段落はフィールド行の一部で、値と改行でつなぐ（R8・R16）。複数あるときは
-    // 箇条書きと同じく空行でつなぐ（R10）
-    let full = if continuation.is_empty() {
-        value.to_string()
-    } else {
-        format!("{value}\n{}", continuation.join("\n\n"))
-    };
     match field.effective_separator() {
-        // 区切った要素は前後の空白を取り除いて抽出し、空の要素は空文字列として残す（R8）
-        Some(sep) => Value::Array(
-            full
-                .split(sep)
-                .map(|s| Value::String(s.trim().to_string()))
-                .collect(),
-        ),
-        None => Value::String(full),
+        // 区切った要素は前後の空白を取り除いて抽出し、空の要素は空文字列として残す（R8）。
+        // 分割は継続段落を含めない値だけを対象にし、継続段落は末尾の要素に改行で付ける（R8・R16）
+        Some(sep) => {
+            let mut elements: Vec<String> =
+                value.split(sep).map(|s| s.trim().to_string()).collect();
+            if let Some(last) = elements.last_mut() {
+                join_continuation(last, continuation);
+            }
+            Value::Array(elements.into_iter().map(Value::String).collect())
+        }
+        None => {
+            // 継続段落はフィールド行の一部で、値と改行でつなぐ（R8・R16）。複数あるときは
+            // 箇条書きと同じく空行でつなぐ（R10）
+            let mut full = value.to_string();
+            join_continuation(&mut full, continuation);
+            Value::String(full)
+        }
     }
 }
 
@@ -594,6 +598,25 @@ document:
 "#;
         let v = values(schema, "# 題名\n\n- タグ: a,b\n- タグ: c\n");
         assert_eq!(v["tags"], json!([["a", "b"], ["c"]]));
+    }
+
+    #[test]
+    fn separator_split_excludes_continuation_paragraphs() {
+        let schema = r#"
+document:
+  preamble:
+    fields:
+      - name: タグ
+        separator: ","
+        extract: tags
+"#;
+        let doc = "# 題名\n\n- タグ: a,b\n\n  継続,の段落\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["tags"],
+            json!(["a", "b\n継続,の段落"]),
+            "継続段落は値の分割に含めず、末尾の要素に改行で付ける（R8・R16）"
+        );
     }
 
     #[test]
