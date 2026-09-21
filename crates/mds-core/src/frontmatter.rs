@@ -128,10 +128,16 @@ fn normalize(path: &Path) -> PathBuf {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {
-                if out.as_os_str().is_empty() {
-                    out.push("..");
-                } else {
+                // 末尾が `..` のときは畳めない。畳むと、積んだ `..` を
+                // 取り消して別の位置を指してしまう
+                let collapsible = out
+                    .components()
+                    .next_back()
+                    .is_some_and(|last| last != Component::ParentDir);
+                if collapsible {
                     out.pop();
+                } else {
+                    out.push("..");
                 }
             }
             other => out.push(other.as_os_str()),
@@ -238,6 +244,20 @@ mod tests {
         assert_eq!(
             resolved,
             ResolvedSchema::File(std::path::PathBuf::from("fixtures/.mds/schemas/adr.yaml"))
+        );
+    }
+
+    // @kotowari[REQ-012]
+    #[test]
+    fn consecutive_parent_refs_are_not_collapsed() {
+        // `..` が積まれている状態でさらに `..` を見たとき、積んだ `..` を
+        // 取り消してはならない。取り消すと、文書が意図しないスキーマで
+        // 黙って検証される
+        let doc = std::path::Path::new("doc.md");
+        let ref_ = SchemaRef::Relative("../../wrong.yaml".into());
+        assert_eq!(
+            resolve_schema(doc, &ref_),
+            ResolvedSchema::File(std::path::PathBuf::from("../../wrong.yaml"))
         );
     }
 
