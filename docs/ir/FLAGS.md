@@ -7,14 +7,6 @@ $schema: ../../.mds/schemas/flags.yaml
 
 ## 問題の記録
 
-### FLAG-001: フィールド行の並び順を写していない
-
-- 種類: gap
-- 関係: REQ-028, REQ-029
-- 出典: docs/decision/records/2026-09-21-mds-spec.md#A10
-
-"docs/spec/mds.md" の R8 は、フィールド行の一覧に並び順の強制を宣言でき、違反を指摘にすると定めている。IR にはこの規則を写していない。
-
 ### FLAG-002: 停止の理由を個別の要求に落としていない
 
 - 種類: gap
