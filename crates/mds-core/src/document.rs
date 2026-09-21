@@ -417,6 +417,19 @@ fn split_field(text: &str) -> Option<(String, String)> {
 }
 
 impl Block {
+    /// ブロックが現れた行番号（1始まり）。`of: line` の抽出に使う（R16）。
+    pub fn line(&self) -> usize {
+        match self {
+            Block::Field { line, .. }
+            | Block::Bullet { line, .. }
+            | Block::OrderedList { line, .. }
+            | Block::Statement { line, .. }
+            | Block::Table { line, .. }
+            | Block::Code { line, .. }
+            | Block::Other { line } => *line,
+        }
+    }
+
     /// 子のブロック（入れ子の箇条書き・コードブロック・表など）。箇条書きでも
     /// フィールド行でもないブロックは空を返す。
     pub fn children(&self) -> &[Block] {

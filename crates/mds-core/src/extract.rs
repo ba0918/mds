@@ -2,7 +2,8 @@
 
 use crate::document::{join_continuation, Block, Document, Item as DocItem, Section as DocSection};
 use crate::schema::{
-    is_declared_field, Bullets, Children, CodeBlock, Extract, Field, Schema, Statement, Table,
+    is_declared_field, item_internals_declare_extract, Bullets, Children, CodeBlock, Extract,
+    Extracts, Field, OfKind, Schema, Statement, Table,
 };
 use serde_json::{Map, Value};
 
@@ -56,28 +57,30 @@ fn extract_title(schema: &Schema, document: &Document, root: &mut Map<String, Va
     let Some(title) = &schema.document.title else {
         return;
     };
-    let Some(extract) = &title.extract else {
+    let Some(extracts) = &title.extract else {
         return;
     };
     let Some(heading) = document.titles.first() else {
         return;
     };
-    let value = match extract {
-        Extract::Path(_) => Value::String(heading.text.clone()),
-        Extract::Capture { group, .. } => {
-            let Some(pattern) = &title.pattern else {
-                return;
-            };
-            let Some(caps) = pattern.captures(&heading.text) else {
-                return;
-            };
-            let Some(m) = caps.name(group) else {
-                return;
-            };
-            Value::String(m.as_str().to_string())
+    // 名前付きキャプチャ（書式2）は取る値が書式ごとに違うので個別に置く
+    for rule in extracts.iter() {
+        let Extract::Capture { path, group } = rule else {
+            continue;
+        };
+        let Some(pattern) = &title.pattern else {
+            continue;
+        };
+        let Some(caps) = pattern.captures(&heading.text) else {
+            continue;
+        };
+        if let Some(m) = caps.name(group) {
+            place(root, path, Value::String(m.as_str().to_string()));
         }
-    };
-    place(root, extract, value);
+    }
+    let got = Extracted::of_value(Value::String(heading.text.clone()))
+        .with_line(Value::from(heading.line));
+    place_all(root, extracts, &got);
 }
 
 fn extract_section(
@@ -91,17 +94,21 @@ fn extract_section(
         .filter(|s| s.name == def.name)
         .collect();
 
-    if let Some(extract) = &def.extract {
+    if let Some(extracts) = &def.extract {
         if def.repeat.is_some() {
             if !occurrences.is_empty() {
                 let bodies: Vec<Value> = occurrences
                     .iter()
                     .map(|s| Value::String(section_body(s, def)))
                     .collect();
-                place(root, extract, Value::Array(bodies));
+                let lines: Vec<Value> = occurrences.iter().map(|s| Value::from(s.line)).collect();
+                let got = Extracted::of_value(Value::Array(bodies)).with_line(Value::Array(lines));
+                place_all(root, extracts, &got);
             }
         } else if let Some(section) = occurrences.first() {
-            place(root, extract, Value::String(section_body(section, def)));
+            let got = Extracted::of_value(Value::String(section_body(section, def)))
+                .with_line(Value::from(section.line));
+            place_all(root, extracts, &got);
         }
     }
 
@@ -117,11 +124,23 @@ fn extract_section(
             let items: Vec<&DocItem> = occurrences.iter().flat_map(|s| s.items.iter()).collect();
             if items.is_empty() {
                 // 0件のときはキーを省略する（R16）
-            } else if item.repeat.is_some() {
-                let values: Vec<Value> = items.iter().map(|i| item_value(i, item)).collect();
-                place(root, extract, Value::Array(values));
             } else {
-                place(root, extract, item_value(items[0], item));
+                // 内部が extract を宣言したか、項目に of を添えた書式があれば
+                // 項目ごとのオブジェクトにする（R16）
+                let as_object = item_internals_declare_extract(item) || extract.has_of();
+                let one = |i: &DocItem| {
+                    if as_object {
+                        item_object(i, item)
+                    } else {
+                        item_value(i, item)
+                    }
+                };
+                let value = if item.repeat.is_some() {
+                    Value::Array(items.iter().map(|i| one(i)).collect())
+                } else {
+                    one(items[0])
+                };
+                place_all(root, extract, &Extracted::of_value(value));
             }
         }
     }
@@ -139,14 +158,18 @@ fn extract_fields(fields: &[Field], blocks: &[&Block], root: &mut Map<String, Va
                 // 0件のときはキーを省略する（R16）
                 continue;
             }
-            let value = if field.repeat.is_some() {
+            let (value, line) = if field.repeat.is_some() {
                 let values: Vec<Value> =
                     occurrences.iter().map(|b| field_single(field, b)).collect();
-                Value::Array(values)
+                let lines: Vec<Value> = occurrences.iter().map(|b| Value::from(b.line())).collect();
+                (Value::Array(values), Value::Array(lines))
             } else {
-                field_single(field, occurrences[0])
+                (
+                    field_single(field, occurrences[0]),
+                    Value::from(occurrences[0].line()),
+                )
             };
-            place(root, extract, value);
+            place_all(root, extract, &Extracted::of_value(value).with_line(line));
         }
     }
 }
@@ -204,12 +227,23 @@ fn extract_statement(
         // 0件のときはキーを省略する（R16）
         return;
     }
-    let value = if statement.repeat.is_some() {
-        Value::Array(texts.iter().map(|t| Value::String(t.to_string())).collect())
+    let statements: Vec<&Block> = blocks
+        .iter()
+        .copied()
+        .filter(|b| matches!(b, Block::Statement { .. }))
+        .collect();
+    let (value, line) = if statement.repeat.is_some() {
+        (
+            Value::Array(texts.iter().map(|t| Value::String(t.to_string())).collect()),
+            Value::Array(statements.iter().map(|b| Value::from(b.line())).collect()),
+        )
     } else {
-        Value::String(texts.join("\n\n"))
+        (
+            Value::String(texts.join("\n\n")),
+            Value::from(statements[0].line()),
+        )
     };
-    place(root, extract, value);
+    place_all(root, extract, &Extracted::of_value(value).with_line(line));
 }
 
 fn extract_bullets(
@@ -252,7 +286,15 @@ fn extract_bullets(
         // 0件のときはキーを省略する（R16）
         return;
     }
-    place(root, extract, Value::Array(texts));
+    let lines: Vec<Value> = bullet_blocks
+        .iter()
+        .map(|b| Value::from(b.line()))
+        .collect();
+    place_all(
+        root,
+        extract,
+        &Extracted::of_value(Value::Array(texts)).with_line(Value::Array(lines)),
+    );
     // 子フィールドは自身の extract を持てば、その配置パスに値を出す（A15）
     if let Some(children) = &bullets.children {
         extract_child_fields(children, &bullet_blocks, root);
@@ -274,14 +316,18 @@ fn extract_child_fields(children: &Children, blocks: &[&Block], root: &mut Map<S
                 // 0件のときはキーを省略する（R16）
                 continue;
             }
-            let value = if field.repeat.is_some() {
+            let (value, line) = if field.repeat.is_some() {
                 let values: Vec<Value> =
                     occurrences.iter().map(|b| field_single(field, b)).collect();
-                Value::Array(values)
+                let lines: Vec<Value> = occurrences.iter().map(|b| Value::from(b.line())).collect();
+                (Value::Array(values), Value::Array(lines))
             } else {
-                field_single(field, occurrences[0])
+                (
+                    field_single(field, occurrences[0]),
+                    Value::from(occurrences[0].line()),
+                )
             };
-            place(root, extract, value);
+            place_all(root, extract, &Extracted::of_value(value).with_line(line));
         }
     }
     // 子の箇条書きの下の children に再帰する。子の箇条書きは Bullet か、この
@@ -361,7 +407,12 @@ fn extract_table(table: Option<&Table>, blocks: &[&Block], root: &mut Map<String
     }
     // 表は repeat の宣言に関わらず常に配列。複数の表は現れた順に1つの配列へ連結する（R16）
     let rows: Vec<Value> = tables.iter().flat_map(|b| table_objects(b)).collect();
-    place(root, extract, Value::Array(rows));
+    let lines: Vec<Value> = tables.iter().map(|b| Value::from(b.line())).collect();
+    place_all(
+        root,
+        extract,
+        &Extracted::of_value(Value::Array(rows)).with_line(Value::Array(lines)),
+    );
 }
 
 fn table_objects(block: &Block) -> Vec<Value> {
@@ -409,16 +460,50 @@ fn extract_codeblock(
             _ => Value::Null,
         })
         .collect();
-    let value = if codeblock.repeat.is_some() {
-        Value::Array(values)
+    let (value, line) = if codeblock.repeat.is_some() {
+        (
+            Value::Array(values),
+            Value::Array(codes.iter().map(|b| Value::from(b.line())).collect()),
+        )
     } else {
-        values.into_iter().next().unwrap()
+        (
+            values.into_iter().next().unwrap(),
+            Value::from(codes[0].line()),
+        )
     };
-    place(root, extract, value);
+    place_all(root, extract, &Extracted::of_value(value).with_line(line));
 }
 
 fn section_body(section: &DocSection, def: &crate::schema::Section) -> String {
     body_from_blocks(&section.blocks, &def.fields, def.bullets.as_ref(), false)
+}
+
+/// 項目をオブジェクトに組み立てる。内部のノードの抽出は項目オブジェクトの中の
+/// 相対パスへ置き、項目自身の `of` を添えた書式も同じオブジェクトの中へ置く（R16）。
+fn item_object(item: &DocItem, item_rule: &crate::schema::Item) -> Value {
+    let mut object = Map::new();
+    let blocks: Vec<&Block> = item.blocks.iter().collect();
+    extract_fields(&item_rule.fields, &blocks, &mut object);
+    extract_statement(item_rule.statement.as_ref(), &blocks, &mut object);
+    extract_bullets(
+        &item_rule.fields,
+        item_rule.bullets.as_ref(),
+        &blocks,
+        &mut object,
+    );
+    extract_table(item_rule.table.as_ref(), &blocks, &mut object);
+    extract_codeblock(item_rule.codeblock.as_ref(), &blocks, &mut object);
+    if let Some(extract) = &item_rule.extract {
+        // 書式1（値）は項目オブジェクトそのものの置き場なので、ここでは置かない
+        let got = Extracted {
+            value: None,
+            line: Some(Value::from(item.line)),
+            id: Some(Value::String(item.id.clone())),
+            name: Some(Value::String(item.title.clone())),
+        };
+        place_all(&mut object, extract, &got);
+    }
+    Value::Object(object)
 }
 
 fn item_value(item: &DocItem, item_rule: &crate::schema::Item) -> Value {
@@ -483,11 +568,50 @@ fn body_from_blocks(
     out
 }
 
-fn place(root: &mut Map<String, Value>, extract: &Extract, value: Value) {
-    let path = match extract {
-        Extract::Path(p) => p.clone(),
-        Extract::Capture { path, .. } => path.clone(),
-    };
+/// 1つのノードから取れるもの。書式1 は `value`、`of` を添えた書式3 は
+/// `line` / `id` / `name` を置く（R16）。
+#[derive(Default)]
+struct Extracted {
+    value: Option<Value>,
+    line: Option<Value>,
+    id: Option<Value>,
+    name: Option<Value>,
+}
+
+impl Extracted {
+    fn of_value(value: Value) -> Self {
+        Extracted {
+            value: Some(value),
+            ..Default::default()
+        }
+    }
+
+    fn with_line(mut self, line: Value) -> Self {
+        self.line = Some(line);
+        self
+    }
+}
+
+/// ノードが宣言したすべての書式を配置パスへ置く。名前付きキャプチャ（書式2）は
+/// 題名の側で個別に置くのでここでは飛ばす。
+fn place_all(root: &mut Map<String, Value>, extracts: &Extracts, got: &Extracted) {
+    for rule in extracts.iter() {
+        let value = match rule {
+            Extract::Path(_) => got.value.clone(),
+            Extract::Capture { .. } => continue,
+            Extract::Of { of, .. } => match of {
+                OfKind::Line => got.line.clone(),
+                OfKind::Id => got.id.clone(),
+                OfKind::Name => got.name.clone(),
+            },
+        };
+        if let Some(value) = value {
+            place(root, rule.path(), value);
+        }
+    }
+}
+
+fn place(root: &mut Map<String, Value>, path: &str, value: Value) {
     let keys: Vec<&str> = path.split('.').collect();
     if keys.is_empty() {
         return;
@@ -1554,6 +1678,110 @@ document:
             v["glossary"],
             json!([{"用語": "印", "意味": "テストの印"}]),
             "前置部の表もヘッダをキーにしたオブジェクトの配列で抽出する（R5・R16）"
+        );
+    }
+
+    // @kotowari[REQ-048]
+    #[test]
+    fn of_line_places_the_line_number_as_a_number() {
+        let schema = "document:\n  sections:\n    - name: 記録\n      fields:\n        - name: 状態\n          extract:\n            - status\n            - { path: status_line, of: line }\n";
+        let doc = "## 記録\n\n- 状態: ok\n";
+        let v = values(schema, doc);
+        assert_eq!(v["status"], "ok", "値は今までどおり置く");
+        assert_eq!(
+            v["status_line"],
+            json!(3),
+            "of: line は行番号を数値で置く（R16）"
+        );
+    }
+
+    // @kotowari[REQ-047, REQ-048]
+    #[test]
+    fn item_extract_becomes_an_object_when_internals_declare_extract() {
+        let schema = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        id: "REQ-\\d{3,}"
+        repeat: { min: 0 }
+        extract:
+          - requirements
+          - { path: id, of: id }
+          - { path: name, of: name }
+          - { path: line, of: line }
+        fields:
+          - name: 種類
+            extract: kind
+          - name: 出典
+            separator: ","
+            extract: sources
+        statement:
+          extract: text
+"#;
+        let doc =
+            "## 要求\n\n### REQ-001: 印の構文\n\n- 種類: algorithm\n- 出典: a.md, b.md\n\n本文。\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["requirements"],
+            json!([{
+                "kind": "algorithm",
+                "sources": ["a.md", "b.md"],
+                "text": "本文。",
+                "id": "REQ-001",
+                "name": "印の構文",
+                "line": 3
+            }]),
+            "内部が extract を宣言したら項目はオブジェクトになる（R16）"
+        );
+    }
+
+    // @kotowari[REQ-047]
+    #[test]
+    fn item_extract_stays_a_string_without_internal_extract() {
+        let schema = "document:\n  sections:\n    - name: 要求\n      item:\n        id: \"REQ-\\\\d{3,}\"\n        repeat: { min: 0 }\n        extract: requirements\n        fields:\n          - name: 種類\n";
+        let doc = "## 要求\n\n### REQ-001: 印の構文\n\n- 種類: algorithm\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["requirements"],
+            json!(["REQ-001: 印の構文\n- 種類: algorithm"]),
+            "内部に extract が無ければ今までどおり文字列（R16）"
+        );
+    }
+
+    // @kotowari[REQ-047]
+    #[test]
+    fn item_object_keys_come_from_the_schema_not_the_document() {
+        // 同じ配置パスを宣言していれば、文書の見出しの語とフィールド行の名前が
+        // 変わっても出力のキーは変わらない。出力の契約はスキーマが持つ（A22）。
+        let japanese = "document:\n  sections:\n    - name: 蔵書\n      item:\n        repeat: { min: 0 }\n        extract:\n          - books\n          - { path: code, of: id }\n        fields:\n          - name: 著者\n            extract: author\n";
+        let english = "document:\n  sections:\n    - name: Books\n      item:\n        repeat: { min: 0 }\n        extract:\n          - books\n          - { path: code, of: id }\n        fields:\n          - name: Author\n            extract: author\n";
+        let japanese_doc = "## 蔵書\n\n### ISBN-1: 吾輩は猫である\n\n- 著者: 夏目漱石\n";
+        let english_doc = "## Books\n\n### ISBN-1: I Am a Cat\n\n- Author: Soseki Natsume\n";
+
+        let from_japanese = values(japanese, japanese_doc);
+        let from_english = values(english, english_doc);
+
+        assert_eq!(
+            from_japanese["books"],
+            json!([{ "author": "夏目漱石", "code": "ISBN-1" }])
+        );
+        assert_eq!(
+            from_english["books"],
+            json!([{ "author": "Soseki Natsume", "code": "ISBN-1" }])
+        );
+        assert_eq!(
+            from_japanese["books"][0]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            from_english["books"][0]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            "文書の語が違っても出力のキーは同じ"
         );
     }
 }

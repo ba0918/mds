@@ -76,7 +76,7 @@ pub struct Document {
 #[serde(deny_unknown_fields)]
 pub struct Title {
     pub pattern: Option<Pattern>,
-    pub extract: Option<Extract>,
+    pub extract: Option<Extracts>,
 }
 
 /// 前置部。R5。
@@ -112,7 +112,7 @@ pub struct Section {
     pub table: Option<Table>,
     pub codeblock: Option<CodeBlock>,
     pub item: Option<Item>,
-    pub extract: Option<Extract>,
+    pub extract: Option<Extracts>,
 }
 
 /// 項目。R7。
@@ -132,7 +132,7 @@ pub struct Item {
     pub codeblock: Option<CodeBlock>,
     pub required: Option<bool>,
     pub repeat: Option<Repeat>,
-    pub extract: Option<Extract>,
+    pub extract: Option<Extracts>,
 }
 
 /// フィールド行。R8。
@@ -149,7 +149,7 @@ pub struct Field {
     /// `csv: true` は `separator: ","` の省略形
     pub csv: Option<bool>,
     pub when: Option<When>,
-    pub extract: Option<Extract>,
+    pub extract: Option<Extracts>,
 }
 
 impl Field {
@@ -178,7 +178,7 @@ pub struct Statement {
     #[serde(rename = "enum")]
     pub r#enum: Option<Vec<String>>,
     pub when: Option<When>,
-    pub extract: Option<Extract>,
+    pub extract: Option<Extracts>,
 }
 
 /// 箇条書きの子の規則。R10。
@@ -199,7 +199,7 @@ pub struct Bullets {
     pub repeat: Option<Repeat>,
     pub pattern: Option<Pattern>,
     pub when: Option<When>,
-    pub extract: Option<Extract>,
+    pub extract: Option<Extracts>,
     /// 子の規則。子のフィールド行と箇条書きを宣言する
     pub children: Option<Children>,
 }
@@ -212,7 +212,7 @@ pub struct Table {
     pub header: Option<Vec<String>>,
     pub required: Option<bool>,
     pub repeat: Option<Repeat>,
-    pub extract: Option<Extract>,
+    pub extract: Option<Extracts>,
 }
 
 /// コードブロック。R12。
@@ -224,7 +224,7 @@ pub struct CodeBlock {
     pub lines: Option<Vec<Pattern>>,
     pub required: Option<bool>,
     pub repeat: Option<Repeat>,
-    pub extract: Option<Extract>,
+    pub extract: Option<Extracts>,
 }
 
 /// 出現回数。R14。
@@ -266,12 +266,71 @@ impl When {
     }
 }
 
-/// 抽出規則。R16 の4書式のうち、文字列は書式1・3・4、Capture は書式2。
+/// `of` が選ぶ、ノードから導かれる値の種類。R16 の書式3。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OfKind {
+    /// ノードが現れた行番号（1始まりの数値）
+    Line,
+    /// 項目の見出しの ID 部分
+    Id,
+    /// 項目の見出しの名前部分
+    Name,
+}
+
+/// 抽出規則の1書式。R16 の書式1（Path）、書式2（Capture）、書式3（Of）。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum Extract {
     Path(String),
     Capture { path: String, group: String },
+    Of { path: String, of: OfKind },
+}
+
+impl Extract {
+    pub fn path(&self) -> &str {
+        match self {
+            Extract::Path(p) => p,
+            Extract::Capture { path, .. } => path,
+            Extract::Of { path, .. } => path,
+        }
+    }
+}
+
+/// 1つのノードが宣言した抽出規則の並び。YAML では1つの書式か、書式の並びを受ける。
+#[derive(Debug, Clone)]
+pub struct Extracts(Vec<Extract>);
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ExtractsRepr {
+    One(Extract),
+    Many(Vec<Extract>),
+}
+
+impl<'de> Deserialize<'de> for Extracts {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Extracts(match ExtractsRepr::deserialize(d)? {
+            ExtractsRepr::One(e) => vec![e],
+            ExtractsRepr::Many(v) => v,
+        }))
+    }
+}
+
+impl Extracts {
+    pub fn iter(&self) -> std::slice::Iter<'_, Extract> {
+        self.0.iter()
+    }
+
+    /// 題名の名前付きキャプチャ（書式2）を1つ返す。
+    pub fn capture(&self) -> Option<&Extract> {
+        self.0.iter().find(|e| matches!(e, Extract::Capture { .. }))
+    }
+
+    /// `of` を添えた書式（書式3）があるか。
+    pub fn has_of(&self) -> bool {
+        self.0.iter().any(|e| matches!(e, Extract::Of { .. }))
+    }
 }
 
 /// スキーマ YAML を型付きのモデルに読み、形の違反を `SchemaError` にする。
@@ -295,7 +354,9 @@ fn validate_schema(schema: &Schema) -> Result<(), SchemaError> {
 }
 
 fn validate_title(title: &Title) -> Result<(), SchemaError> {
-    let Some(Extract::Capture { group, .. }) = &title.extract else {
+    reject_item_only_of(title.extract.as_ref(), "title")?;
+    let Some(Extract::Capture { group, .. }) = title.extract.as_ref().and_then(|e| e.capture())
+    else {
         return Ok(());
     };
     // 書式2（名前付きキャプチャ）は pattern のキャプチャを取る。pattern が無い、
@@ -327,6 +388,7 @@ fn validate_section(section: &Section) -> Result<(), SchemaError> {
         repeat.validate()?;
     }
     reject_capture_extract(section.extract.as_ref(), "section")?;
+    reject_item_only_of(section.extract.as_ref(), "section")?;
     validate_fields(&section.fields)?;
     validate_statement(section.statement.as_ref())?;
     validate_bullets(section.bullets.as_ref(), false, false)?;
@@ -343,29 +405,43 @@ fn validate_item(item: &Item) -> Result<(), SchemaError> {
         repeat.validate()?;
     }
     reject_capture_extract(item.extract.as_ref(), "item")?;
-    // 項目の内部のフィールド行・文・箇条書き・表・コードブロックには extract を宣言できない（R16）
-    if let Some(field) = item.fields.iter().find(|f| f.extract.is_some()) {
-        return Err(SchemaError(format!(
-            "item field \"{}\" cannot declare extract",
-            field.name
-        )));
+    // 項目の内部に extract を宣言するなら、項目自身も extract を持つ必要がある。
+    // 内部の配置パスは項目オブジェクトの中の相対パスなので、置き場が要る（R16）
+    if item.extract.is_none() && item_internals_declare_extract(item) {
+        return Err(SchemaError(
+            "item internals declare extract but the item itself does not".into(),
+        ));
     }
-    if let Some(statement) = &item.statement {
-        if statement.extract.is_some() {
-            return Err(SchemaError("item statement cannot declare extract".into()));
-        }
-    }
-    if let Some(bullets) = &item.bullets {
-        if bullets.extract.is_some() {
-            return Err(SchemaError("item bullets cannot declare extract".into()));
-        }
-    }
-    validate_table(item.table.as_ref(), true)?;
-    validate_codeblock(item.codeblock.as_ref(), true)?;
+    validate_table(item.table.as_ref(), false)?;
+    validate_codeblock(item.codeblock.as_ref(), false)?;
     validate_fields(&item.fields)?;
     validate_statement(item.statement.as_ref())?;
-    validate_bullets(item.bullets.as_ref(), false, true)?;
+    validate_bullets(item.bullets.as_ref(), false, false)?;
     Ok(())
+}
+
+/// 項目の内部のノードが1つでも `extract` を宣言しているか。宣言していれば
+/// 項目の抽出はオブジェクトの形になる（R16）。
+pub(crate) fn item_internals_declare_extract(item: &Item) -> bool {
+    item.fields.iter().any(|f| f.extract.is_some())
+        || item.statement.as_ref().is_some_and(|s| s.extract.is_some())
+        || item
+            .bullets
+            .as_ref()
+            .is_some_and(|b| b.extract.is_some() || bullets_children_declare_extract(b))
+        || item.table.as_ref().is_some_and(|t| t.extract.is_some())
+        || item.codeblock.as_ref().is_some_and(|c| c.extract.is_some())
+}
+
+fn bullets_children_declare_extract(bullets: &Bullets) -> bool {
+    let Some(children) = &bullets.children else {
+        return false;
+    };
+    children.fields.iter().any(|f| f.extract.is_some())
+        || children
+            .bullets
+            .as_deref()
+            .is_some_and(bullets_children_declare_extract)
 }
 
 /// 表の規則を検査する。`in_item` が真のとき、項目の内部なので extract を拒む（R16）。
@@ -378,6 +454,7 @@ fn validate_table(table: Option<&Table>, in_item: bool) -> Result<(), SchemaErro
             repeat.validate()?;
         }
         reject_capture_extract(table.extract.as_ref(), "table")?;
+        reject_item_only_of(table.extract.as_ref(), "table")?;
     }
     Ok(())
 }
@@ -392,6 +469,7 @@ fn validate_codeblock(codeblock: Option<&CodeBlock>, in_item: bool) -> Result<()
             repeat.validate()?;
         }
         reject_capture_extract(codeblock.extract.as_ref(), "codeblock")?;
+        reject_item_only_of(codeblock.extract.as_ref(), "codeblock")?;
     }
     Ok(())
 }
@@ -405,6 +483,7 @@ fn validate_fields(fields: &[Field]) -> Result<(), SchemaError> {
             when.validate()?;
         }
         reject_capture_extract(field.extract.as_ref(), "field")?;
+        reject_item_only_of(field.extract.as_ref(), "field")?;
     }
     Ok(())
 }
@@ -418,6 +497,7 @@ fn validate_statement(statement: Option<&Statement>) -> Result<(), SchemaError> 
             when.validate()?;
         }
         reject_capture_extract(statement.extract.as_ref(), "statement")?;
+        reject_item_only_of(statement.extract.as_ref(), "statement")?;
     }
     Ok(())
 }
@@ -442,6 +522,8 @@ fn validate_bullets(
         if !in_children {
             reject_capture_extract(bullets.extract.as_ref(), "bullets")?;
         }
+        reject_item_only_of(bullets.extract.as_ref(), "bullets")?;
+        {}
         if let Some(children) = &bullets.children {
             // 項目の内部のフィールド行には extract を宣言できない（R16）。項目の
             // bullets の子フィールドも項目の内部なので、入れ子の深さを問わず
@@ -469,11 +551,33 @@ fn validate_bullets(
 
 /// 題名以外のノードには書式2（名前付きキャプチャ）の抽出を宣言できない（R16）。
 /// 宣言すると schema_invalid の停止になる。
-fn reject_capture_extract(extract: Option<&Extract>, node: &str) -> Result<(), SchemaError> {
-    if let Some(Extract::Capture { .. }) = extract {
+fn reject_capture_extract(extract: Option<&Extracts>, node: &str) -> Result<(), SchemaError> {
+    if extract.and_then(|e| e.capture()).is_some() {
         return Err(SchemaError(format!(
             "{node} extract cannot use the named-group capture form"
         )));
+    }
+    Ok(())
+}
+
+/// 項目の外のノードには `of: id` と `of: name` を宣言できない（R16）。
+fn reject_item_only_of(extract: Option<&Extracts>, node: &str) -> Result<(), SchemaError> {
+    let Some(extracts) = extract else {
+        return Ok(());
+    };
+    for e in extracts.iter() {
+        if let Extract::Of { of, .. } = e {
+            if matches!(of, OfKind::Id | OfKind::Name) {
+                return Err(SchemaError(format!(
+                    "{node} extract cannot use of: {}",
+                    match of {
+                        OfKind::Id => "id",
+                        OfKind::Name => "name",
+                        OfKind::Line => "line",
+                    }
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -578,14 +682,20 @@ document:
         extract: status
 "#;
         let schema = parse_schema(yaml).unwrap();
+        let title = schema.document.title.unwrap();
+        let title_rules: Vec<&Extract> = title.extract.as_ref().unwrap().iter().collect();
         assert!(matches!(
-            schema.document.title.unwrap().extract,
-            Some(Extract::Capture { ref path, ref group }) if path == "id" && group == "id"
+            title_rules[0],
+            Extract::Capture { path, group } if path == "id" && group == "id"
         ));
-        assert!(matches!(
-            schema.document.preamble.unwrap().fields[0].extract,
-            Some(Extract::Path(ref p)) if p == "status"
-        ));
+        let preamble = schema.document.preamble.unwrap();
+        let field_rules: Vec<&Extract> = preamble.fields[0]
+            .extract
+            .as_ref()
+            .unwrap()
+            .iter()
+            .collect();
+        assert!(matches!(field_rules[0], Extract::Path(p) if p == "status"));
     }
 
     // @kotowari[REQ-018, EX-008]
@@ -708,7 +818,7 @@ document:
 
     // @kotowari[REQ-039]
     #[test]
-    fn item_internal_extract_is_schema_invalid() {
+    fn item_internal_extract_without_item_extract_is_schema_invalid() {
         let yaml = r#"
 document:
   sections:
@@ -723,7 +833,7 @@ document:
 
     // @kotowari[REQ-039]
     #[test]
-    fn item_child_field_extract_is_schema_invalid() {
+    fn item_child_field_extract_without_item_extract_is_schema_invalid() {
         // item の bullets.children.fields も「項目の内部のフィールド行」なので、
         // extract を宣言すると schema_invalid（R16）。
         let yaml = r#"
@@ -746,7 +856,7 @@ document:
 
     // @kotowari[REQ-039]
     #[test]
-    fn item_deep_child_field_extract_is_schema_invalid() {
+    fn item_deep_child_field_extract_without_item_extract_is_schema_invalid() {
         // 再帰的な入れ子（item の bullets.children.bullets.children.fields）も
         // 項目の内部のフィールド行なので schema_invalid（R16）。
         let yaml = r#"
@@ -931,7 +1041,7 @@ document:
 
     // @kotowari[REQ-039, EX-014]
     #[test]
-    fn item_table_extract_is_rejected() {
+    fn item_table_extract_without_item_extract_is_rejected() {
         let yaml = r#"
 document:
   sections:
@@ -943,13 +1053,13 @@ document:
 "#;
         assert!(
             parse_schema(yaml).is_err(),
-            "項目の内部の表には extract を宣言できない（R16）"
+            "項目が extract を持たないまま内部の表に宣言すると停止する（R16）"
         );
     }
 
     // @kotowari[REQ-039]
     #[test]
-    fn item_codeblock_extract_is_rejected() {
+    fn item_codeblock_extract_without_item_extract_is_rejected() {
         let yaml = r#"
 document:
   sections:
@@ -961,7 +1071,7 @@ document:
 "#;
         assert!(
             parse_schema(yaml).is_err(),
-            "項目の内部のコードブロックには extract を宣言できない（R16）"
+            "項目が extract を持たないまま内部のコードブロックに宣言すると停止する（R16）"
         );
     }
 
@@ -998,6 +1108,63 @@ document:
         assert!(
             parse_schema(yaml).is_err(),
             "項目のコードブロックの repeat も min > max なら停止する（R14）"
+        );
+    }
+
+    // @kotowari[REQ-035, REQ-048]
+    #[test]
+    fn of_id_outside_an_item_is_rejected() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 記録
+      fields:
+        - name: 状態
+          extract: { path: id, of: id }
+"#;
+        assert!(
+            parse_schema(yaml).is_err(),
+            "of: id は項目にだけ宣言できる（R16）"
+        );
+    }
+
+    // @kotowari[REQ-035, REQ-048]
+    #[test]
+    fn unknown_of_value_is_rejected() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 記録
+      fields:
+        - name: 状態
+          extract: { path: x, of: column }
+"#;
+        assert!(
+            parse_schema(yaml).is_err(),
+            "of の知らない語は停止する（R16）"
+        );
+    }
+
+    // @kotowari[REQ-039, REQ-047]
+    #[test]
+    fn item_internal_extract_with_item_extract_loads() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 要求
+      item:
+        extract:
+          - requirements
+          - { path: id, of: id }
+        fields:
+          - name: 種類
+            extract: kind
+        table:
+          extract: rows
+"#;
+        assert!(
+            parse_schema(yaml).is_ok(),
+            "項目が extract を持てば内部にも宣言できる（R16）"
         );
     }
 }
