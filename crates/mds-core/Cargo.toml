@@ -1,10 +1,10 @@
 [package]
 name = "mds-core"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.89"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ba0918/mds"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 keywords = ["markdown", "schema", "validation"]
 categories = ["text-processing", "parser-implementations"]
 description = "Schema language, validation, and extraction for mds"
