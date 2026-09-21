@@ -1,0 +1,69 @@
+# kotowari の IR の話題ごとの文書の書式（ir-form.md の「項目」の表）
+name: ir
+open: false
+document:
+  title:
+    pattern: "^.+"
+    extract: title
+  preamble:
+    statement:
+      required: true
+      extract: scope
+  sections:
+    - name: 要求
+      required: false
+      item:
+        id: "REQ-\\d{3,}"
+        repeat: { min: 0 }
+        fields:
+          - name: 種類
+            enum: [event_driven, state_driven, ubiquitous, prohibition, invariant, algorithm]
+          - name: 出典
+            separator: ","
+            pattern: "^docs/"
+          - name: 検証
+            enum: [unit, property, proof, review]
+          - name: 定義
+            separator: ","
+            required: true
+            when: { field: 種類, eq: algorithm }
+          - name: 確かめ方
+            required: true
+            when: { field: 検証, eq: review }
+        statement:
+          required: true
+          when: { field: 種類, ne: algorithm }
+    - name: 決定表
+      required: false
+      item:
+        id: "TBL-\\d{3,}"
+        repeat: { min: 0 }
+        fields:
+          - name: 出典
+            separator: ","
+            pattern: "^docs/"
+        table: {}
+        statement:
+          required: false
+    - name: 性質
+      required: false
+      item:
+        id: "PROP-\\d{3,}"
+        repeat: { min: 0 }
+        fields:
+          - name: 出典
+            separator: ","
+            pattern: "^docs/"
+        statement:
+          required: true
+    - name: 具体例
+      required: false
+      codeblock:
+        lang: gherkin
+        repeat: { min: 0 }
+        lines:
+          - "^@"
+          - "^Scenario:"
+          - "^(Given|When|Then|And|But) "
+          - "^#"
+        extract: scenarios

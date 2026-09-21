@@ -1,0 +1,12 @@
+# kotowari の IR の用語集（CONTEXT.md）の書式
+name: ir-context
+open: false
+document:
+  title:
+    pattern: "^用語集$"
+    extract: title
+  preamble:
+    statement:
+      required: false
+      extract: scope
+  sections: []
