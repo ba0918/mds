@@ -377,9 +377,9 @@ fn validate_title(title: &Title) -> Result<(), SchemaError> {
 fn validate_preamble(preamble: &Preamble) -> Result<(), SchemaError> {
     validate_fields(&preamble.fields)?;
     validate_statement(preamble.statement.as_ref())?;
-    validate_bullets(preamble.bullets.as_ref(), false, false)?;
-    validate_table(preamble.table.as_ref(), false)?;
-    validate_codeblock(preamble.codeblock.as_ref(), false)?;
+    validate_bullets(preamble.bullets.as_ref(), false)?;
+    validate_table(preamble.table.as_ref())?;
+    validate_codeblock(preamble.codeblock.as_ref())?;
     Ok(())
 }
 
@@ -391,9 +391,9 @@ fn validate_section(section: &Section) -> Result<(), SchemaError> {
     reject_item_only_of(section.extract.as_ref(), "section")?;
     validate_fields(&section.fields)?;
     validate_statement(section.statement.as_ref())?;
-    validate_bullets(section.bullets.as_ref(), false, false)?;
-    validate_table(section.table.as_ref(), false)?;
-    validate_codeblock(section.codeblock.as_ref(), false)?;
+    validate_bullets(section.bullets.as_ref(), false)?;
+    validate_table(section.table.as_ref())?;
+    validate_codeblock(section.codeblock.as_ref())?;
     if let Some(item) = &section.item {
         validate_item(item)?;
     }
@@ -412,11 +412,11 @@ fn validate_item(item: &Item) -> Result<(), SchemaError> {
             "item internals declare extract but the item itself does not".into(),
         ));
     }
-    validate_table(item.table.as_ref(), false)?;
-    validate_codeblock(item.codeblock.as_ref(), false)?;
+    validate_table(item.table.as_ref())?;
+    validate_codeblock(item.codeblock.as_ref())?;
     validate_fields(&item.fields)?;
     validate_statement(item.statement.as_ref())?;
-    validate_bullets(item.bullets.as_ref(), false, false)?;
+    validate_bullets(item.bullets.as_ref(), false)?;
     Ok(())
 }
 
@@ -444,12 +444,9 @@ fn bullets_children_declare_extract(bullets: &Bullets) -> bool {
             .is_some_and(bullets_children_declare_extract)
 }
 
-/// 表の規則を検査する。`in_item` が真のとき、項目の内部なので extract を拒む（R16）。
-fn validate_table(table: Option<&Table>, in_item: bool) -> Result<(), SchemaError> {
+/// 表の規則を検査する。
+fn validate_table(table: Option<&Table>) -> Result<(), SchemaError> {
     if let Some(table) = table {
-        if in_item && table.extract.is_some() {
-            return Err(SchemaError("item table cannot declare extract".into()));
-        }
         if let Some(repeat) = &table.repeat {
             repeat.validate()?;
         }
@@ -459,12 +456,9 @@ fn validate_table(table: Option<&Table>, in_item: bool) -> Result<(), SchemaErro
     Ok(())
 }
 
-/// コードブロックの規則を検査する。`in_item` が真のとき、項目の内部なので extract を拒む（R16）。
-fn validate_codeblock(codeblock: Option<&CodeBlock>, in_item: bool) -> Result<(), SchemaError> {
+/// コードブロックの規則を検査する。
+fn validate_codeblock(codeblock: Option<&CodeBlock>) -> Result<(), SchemaError> {
     if let Some(codeblock) = codeblock {
-        if in_item && codeblock.extract.is_some() {
-            return Err(SchemaError("item codeblock cannot declare extract".into()));
-        }
         if let Some(repeat) = &codeblock.repeat {
             repeat.validate()?;
         }
@@ -502,11 +496,7 @@ fn validate_statement(statement: Option<&Statement>) -> Result<(), SchemaError> 
     Ok(())
 }
 
-fn validate_bullets(
-    bullets: Option<&Bullets>,
-    in_children: bool,
-    forbid_child_field_extract: bool,
-) -> Result<(), SchemaError> {
+fn validate_bullets(bullets: Option<&Bullets>, in_children: bool) -> Result<(), SchemaError> {
     if let Some(bullets) = bullets {
         if in_children && bullets.extract.is_some() {
             return Err(SchemaError(
@@ -523,27 +513,9 @@ fn validate_bullets(
             reject_capture_extract(bullets.extract.as_ref(), "bullets")?;
         }
         reject_item_only_of(bullets.extract.as_ref(), "bullets")?;
-        {}
         if let Some(children) = &bullets.children {
-            // 項目の内部のフィールド行には extract を宣言できない（R16）。項目の
-            // bullets の子フィールドも項目の内部なので、入れ子の深さを問わず
-            // 同じ制約を適用する
-            if forbid_child_field_extract {
-                for field in &children.fields {
-                    if field.extract.is_some() {
-                        return Err(SchemaError(format!(
-                            "item field \"{}\" cannot declare extract",
-                            field.name
-                        )));
-                    }
-                }
-            }
             validate_fields(&children.fields)?;
-            validate_bullets(
-                children.bullets.as_deref(),
-                true,
-                forbid_child_field_extract,
-            )?;
+            validate_bullets(children.bullets.as_deref(), true)?;
         }
     }
     Ok(())
