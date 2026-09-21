@@ -15,47 +15,73 @@ document:
       item:
         id: "REQ-\\d{3,}"
         repeat: { min: 0 }
+        extract:
+          - requirements
+          - { path: id, of: id }
+          - { path: name, of: name }
+          - { path: line, of: line }
         fields:
           - name: 種類
             enum: [event_driven, state_driven, ubiquitous, prohibition, invariant, algorithm]
+            extract: kind
           - name: 出典
             separator: ","
             pattern: "^docs/"
+            extract: sources
           - name: 検証
             enum: [unit, property, proof, review]
+            extract: verification
           - name: 定義
             separator: ","
             required: true
             when: { field: 種類, eq: algorithm }
+            extract: definitions
           - name: 確かめ方
             required: true
             when: { field: 検証, eq: review }
+            extract: how_to_verify
         statement:
           required: true
           when: { field: 種類, ne: algorithm }
+          extract: text
     - name: 決定表
       required: false
       item:
         id: "TBL-\\d{3,}"
         repeat: { min: 0 }
+        extract:
+          - tables
+          - { path: id, of: id }
+          - { path: name, of: name }
+          - { path: line, of: line }
         fields:
           - name: 出典
             separator: ","
             pattern: "^docs/"
-        table: {}
+            extract: sources
+        table:
+          extract: rows
         statement:
           required: false
+          extract: text
     - name: 性質
       required: false
       item:
         id: "PROP-\\d{3,}"
         repeat: { min: 0 }
+        extract:
+          - properties
+          - { path: id, of: id }
+          - { path: name, of: name }
+          - { path: line, of: line }
         fields:
           - name: 出典
             separator: ","
             pattern: "^docs/"
+            extract: sources
         statement:
           required: true
+          extract: text
     - name: 具体例
       required: false
       codeblock:
