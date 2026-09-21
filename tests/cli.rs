@@ -679,7 +679,9 @@ fn decision_record_fixture_passes_check_and_extracts_values() {
     );
     assert_eq!(
         decisions[1],
-        serde_json::json!("- 決定2 これは実在しないダミーの決定である。既定の置き場所をこの書式で表す")
+        serde_json::json!(
+            "- 決定2 これは実在しないダミーの決定である。既定の置き場所をこの書式で表す"
+        )
     );
     // 子フィールド superseded_by は自身の extract で別の配置パスに値が出る
     assert_eq!(
