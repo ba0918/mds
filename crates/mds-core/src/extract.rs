@@ -1468,4 +1468,28 @@ document:
             "深いレベルの子フィールドも自身の extract で配置パスに値を出す（A15）"
         );
     }
+
+    #[test]
+    fn item_body_excludes_table_and_code_block() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定表
+      item:
+        id: "TBL-\\d{3,}"
+        repeat: { min: 0 }
+        extract: tables
+        fields:
+          - name: 出典
+        table:
+          header: [用語, 意味]
+"#;
+        let doc = "## 決定表\n\n### TBL-001: 名前\n\n- 出典: docs/a.md\n\n| 用語 | 意味 |\n|---|---|\n| 印 | テストの印 |\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["tables"],
+            json!(["TBL-001: 名前\n- 出典: docs/a.md"]),
+            "項目の抽出の本文に表を含めない（R16）"
+        );
+    }
 }

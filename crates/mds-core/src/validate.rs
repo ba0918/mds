@@ -256,8 +256,8 @@ impl<'a> ContainerRules<'a> {
             ordered: item.ordered,
             statement: item.statement.as_ref(),
             bullets: item.bullets.as_ref(),
-            table: None,
-            codeblock: None,
+            table: item.table.as_ref(),
+            codeblock: item.codeblock.as_ref(),
         }
     }
 
@@ -2244,5 +2244,66 @@ document:
         let doc = "## 要求\n\n- 種類: algorithm\n";
         let findings = validate_src(schema, doc, false);
         assert!(kinds(&findings).contains(&FindingKind::MissingStatement));
+    }
+
+    #[test]
+    fn table_declared_on_an_item_is_not_undeclared() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定表
+      item:
+        id: "TBL-\\d{3,}"
+        repeat: { min: 0 }
+        table:
+          header: [用語, 意味]
+"#;
+        let doc =
+            "## 決定表\n\n### TBL-001: 名前\n\n| 用語 | 意味 |\n|---|---|\n| 印 | テストの印 |\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "項目に宣言した表は undeclared_line にしない（R7）"
+        );
+    }
+
+    #[test]
+    fn table_header_mismatch_on_an_item_is_found() {
+        let schema = r#"
+document:
+  sections:
+    - name: 決定表
+      item:
+        id: "TBL-\\d{3,}"
+        repeat: { min: 0 }
+        table:
+          header: [用語, 意味]
+"#;
+        let doc = "## 決定表\n\n### TBL-001: 名前\n\n| 語 | 訳 |\n|---|---|\n| 印 | mark |\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::TableHeaderMismatch),
+            "項目の表のヘッダ不一致は table_header_mismatch にする（R7・R11）"
+        );
+    }
+
+    #[test]
+    fn code_block_declared_on_an_item_is_not_undeclared() {
+        let schema = r#"
+document:
+  sections:
+    - name: 具体例
+      item:
+        id: "EX-\\d{3,}"
+        repeat: { min: 0 }
+        codeblock:
+          lang: gherkin
+"#;
+        let doc = "## 具体例\n\n### EX-001: 名前\n\n```gherkin\nScenario: 印を書く\n```\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "項目に宣言したコードブロックは undeclared_line にしない（R7）"
+        );
     }
 }

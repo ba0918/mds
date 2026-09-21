@@ -126,6 +126,8 @@ pub struct Item {
     pub ordered: bool,
     pub statement: Option<Statement>,
     pub bullets: Option<Bullets>,
+    pub table: Option<Table>,
+    pub codeblock: Option<CodeBlock>,
     pub required: Option<bool>,
     pub repeat: Option<Repeat>,
     pub extract: Option<Extract>,
@@ -323,18 +325,8 @@ fn validate_section(section: &Section) -> Result<(), SchemaError> {
     validate_fields(&section.fields)?;
     validate_statement(section.statement.as_ref())?;
     validate_bullets(section.bullets.as_ref(), false, false)?;
-    if let Some(table) = &section.table {
-        if let Some(repeat) = &table.repeat {
-            repeat.validate()?;
-        }
-        reject_capture_extract(table.extract.as_ref(), "table")?;
-    }
-    if let Some(codeblock) = &section.codeblock {
-        if let Some(repeat) = &codeblock.repeat {
-            repeat.validate()?;
-        }
-        reject_capture_extract(codeblock.extract.as_ref(), "codeblock")?;
-    }
+    validate_table(section.table.as_ref(), false)?;
+    validate_codeblock(section.codeblock.as_ref(), false)?;
     if let Some(item) = &section.item {
         validate_item(item)?;
     }
@@ -346,7 +338,7 @@ fn validate_item(item: &Item) -> Result<(), SchemaError> {
         repeat.validate()?;
     }
     reject_capture_extract(item.extract.as_ref(), "item")?;
-    // 項目の内部のフィールド行・文・箇条書きには extract を宣言できない（R16）
+    // 項目の内部のフィールド行・文・箇条書き・表・コードブロックには extract を宣言できない（R16）
     if let Some(field) = item.fields.iter().find(|f| f.extract.is_some()) {
         return Err(SchemaError(format!(
             "item field \"{}\" cannot declare extract",
@@ -363,9 +355,39 @@ fn validate_item(item: &Item) -> Result<(), SchemaError> {
             return Err(SchemaError("item bullets cannot declare extract".into()));
         }
     }
+    validate_table(item.table.as_ref(), true)?;
+    validate_codeblock(item.codeblock.as_ref(), true)?;
     validate_fields(&item.fields)?;
     validate_statement(item.statement.as_ref())?;
     validate_bullets(item.bullets.as_ref(), false, true)?;
+    Ok(())
+}
+
+/// 表の規則を検査する。`in_item` が真のとき、項目の内部なので extract を拒む（R16）。
+fn validate_table(table: Option<&Table>, in_item: bool) -> Result<(), SchemaError> {
+    if let Some(table) = table {
+        if in_item && table.extract.is_some() {
+            return Err(SchemaError("item table cannot declare extract".into()));
+        }
+        if let Some(repeat) = &table.repeat {
+            repeat.validate()?;
+        }
+        reject_capture_extract(table.extract.as_ref(), "table")?;
+    }
+    Ok(())
+}
+
+/// コードブロックの規則を検査する。`in_item` が真のとき、項目の内部なので extract を拒む（R16）。
+fn validate_codeblock(codeblock: Option<&CodeBlock>, in_item: bool) -> Result<(), SchemaError> {
+    if let Some(codeblock) = codeblock {
+        if in_item && codeblock.extract.is_some() {
+            return Err(SchemaError("item codeblock cannot declare extract".into()));
+        }
+        if let Some(repeat) = &codeblock.repeat {
+            repeat.validate()?;
+        }
+        reject_capture_extract(codeblock.extract.as_ref(), "codeblock")?;
+    }
     Ok(())
 }
 
@@ -873,6 +895,74 @@ document:
         assert!(
             parse_schema(yaml).is_ok(),
             "子フィールドは自分の extract を持つことができる（R10）"
+        );
+    }
+
+    #[test]
+    fn item_table_extract_is_rejected() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 決定表
+      item:
+        table:
+          header: [用語, 意味]
+          extract: glossary
+"#;
+        assert!(
+            parse_schema(yaml).is_err(),
+            "項目の内部の表には extract を宣言できない（R16）"
+        );
+    }
+
+    #[test]
+    fn item_codeblock_extract_is_rejected() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 具体例
+      item:
+        codeblock:
+          lang: gherkin
+          extract: scenarios
+"#;
+        assert!(
+            parse_schema(yaml).is_err(),
+            "項目の内部のコードブロックには extract を宣言できない（R16）"
+        );
+    }
+
+    #[test]
+    fn item_table_invalid_repeat_is_rejected() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 決定表
+      item:
+        table:
+          header: [用語, 意味]
+          repeat: { min: 2, max: 1 }
+"#;
+        assert!(
+            parse_schema(yaml).is_err(),
+            "項目の表の repeat も min > max なら停止する（R14）"
+        );
+    }
+
+    #[test]
+    fn item_codeblock_invalid_repeat_is_rejected() {
+        let yaml = r#"
+document:
+  sections:
+    - name: 具体例
+      item:
+        codeblock:
+          lang: gherkin
+          repeat: { min: 2, max: 1 }
+"#;
+        assert!(
+            parse_schema(yaml).is_err(),
+            "項目のコードブロックの repeat も min > max なら停止する（R14）"
         );
     }
 }
