@@ -1,0 +1,27 @@
+# kotowari の IR の問題の記録（FLAGS.md）の書式
+name: ir-flags
+open: false
+document:
+  title:
+    pattern: "^.+"
+    extract: title
+  preamble:
+    statement:
+      required: false
+      extract: scope
+  sections:
+    - name: 問題の記録
+      required: false
+      item:
+        id: "FLAG-\\d{3,}"
+        repeat: { min: 0 }
+        fields:
+          - name: 種類
+            enum: [contradiction, gap, ambiguity]
+          - name: 関係
+            separator: ","
+          - name: 出典
+            separator: ","
+            pattern: "^docs/"
+        statement:
+          required: true
