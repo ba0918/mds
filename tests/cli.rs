@@ -588,6 +588,36 @@ fn check_directory_does_not_follow_symlinks() {
     assert!(output.stdout.is_empty());
 }
 
+// @kotowari[REQ-043]
+#[test]
+fn stop_does_not_carry_the_referenced_file_contents() {
+    // スキーマとして読めないファイルを `$schema` に指定すると、パーサの
+    // メッセージが参照先の中身を引用する。`$schema` は文書側が自由に書ける
+    // ので、そのまま流すと読める任意のファイルの断片が標準エラーへ出る
+    let dir = tempfile::tempdir().unwrap();
+    write_file(
+        dir.path(),
+        "not-a-schema.txt",
+        "FIRST_LINE=alpha\nSECOND_LINE=bravo\nTHIRD_LINE=charlie\n",
+    );
+    let doc = write_file(
+        dir.path(),
+        "doc.md",
+        "---\n$schema: ./not-a-schema.txt\n---\n# T-1: x\n",
+    );
+    let output = mds()
+        .args(["check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stderr.lines().count(), 1, "停止は1行で出す: {stderr}");
+    assert!(
+        !stderr.contains("SECOND_LINE") && !stderr.contains("THIRD_LINE"),
+        "参照先ファイルの中身が標準エラーに出ている: {stderr}"
+    );
+}
+
 // @kotowari[REQ-010, REQ-009, REQ-042]
 #[test]
 fn check_directory_stops_on_invalid_schema() {

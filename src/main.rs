@@ -62,7 +62,13 @@ struct Stop {
 
 impl std::fmt::Display for Stop {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.kind, self.detail)
+        // 停止は1行（R19、R20）。detail が複数行でも後続の行は落とす。
+        // スキーマのパーサは誤りの位置とともに参照先ファイルの中身を引用
+        // するため、そのまま流すと読める任意のファイルの断片が標準エラー
+        // へ出る。1行に切る場所をここに置くのは、停止の種類が増えても
+        // 書き出し口が1つのままだから
+        let first_line = self.detail.lines().next().unwrap_or_default();
+        write!(f, "{}: {}", self.kind, first_line)
     }
 }
 
