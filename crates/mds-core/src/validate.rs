@@ -374,34 +374,7 @@ fn validate_children(block: &Block, children: Option<&Children>, findings: &mut 
                     .find(|f| f.name == *name)
                     .expect("is_declared_field が一致を保証する");
                 if when_allows(field.when.as_ref(), &children.fields, child_blocks) {
-                    // 区切った要素は前後の空白を取り除いてから照合する（R8）
-                    let values: Vec<String> = match field.effective_separator() {
-                        Some(sep) => split_trimmed(value, sep),
-                        None => vec![value.clone()],
-                    };
-                    for v in &values {
-                        if let Some(pattern) = &field.pattern
-                            && !pattern.is_match(v)
-                        {
-                            findings.push(Finding {
-                                kind: FindingKind::FieldPatternMismatch,
-                                line: Some(*line),
-                                detail: format!(
-                                    "value \"{v}\" does not match pattern \"{}\"",
-                                    pattern.source()
-                                ),
-                            });
-                        }
-                        if let Some(allowed) = &field.r#enum
-                            && !allowed.iter().any(|e| e == v)
-                        {
-                            findings.push(Finding {
-                                kind: FindingKind::FieldEnumInvalid,
-                                line: Some(*line),
-                                detail: format!("value \"{v}\" is not one of {allowed:?}"),
-                            });
-                        }
-                    }
+                    validate_field_value(field, value, *line, findings);
                 }
                 // 子フィールドも children 宣言を持たない。宣言済み子フィールド行の
                 // 下の子リストは undeclared_line（R13）
@@ -532,34 +505,7 @@ fn validate_container(
                         ordered_seen.push((idx, *line));
                         let field = &rules.fields[idx];
                         if when_allows(field.when.as_ref(), rules.fields, blocks) {
-                            // 区切った要素は前後の空白を取り除いてから照合する（R8）
-                            let values: Vec<String> = match field.effective_separator() {
-                                Some(sep) => split_trimmed(value, sep),
-                                None => vec![value.clone()],
-                            };
-                            for v in &values {
-                                if let Some(pattern) = &field.pattern
-                                    && !pattern.is_match(v)
-                                {
-                                    findings.push(Finding {
-                                        kind: FindingKind::FieldPatternMismatch,
-                                        line: Some(*line),
-                                        detail: format!(
-                                            "value \"{v}\" does not match pattern \"{}\"",
-                                            pattern.source()
-                                        ),
-                                    });
-                                }
-                                if let Some(allowed) = &field.r#enum
-                                    && !allowed.iter().any(|e| e == v)
-                                {
-                                    findings.push(Finding {
-                                        kind: FindingKind::FieldEnumInvalid,
-                                        line: Some(*line),
-                                        detail: format!("value \"{v}\" is not one of {allowed:?}"),
-                                    });
-                                }
-                            }
+                            validate_field_value(field, value, *line, findings);
                         }
                         // フィールド行は children 宣言を持たない。宣言済みフィールド行の
                         // 下の子リストは undeclared_line（R13）
@@ -782,6 +728,39 @@ fn validate_container(
 
 /// `separator` で分けた要素を、前後の空白を取り除いて返す。空の要素は
 /// 空文字列として残す（R8）。
+/// フィールド行の値を、宣言された区切り・pattern・enum に照らす（R8）。
+/// 前置部と節のフィールド行にも、箇条書きの子フィールド行にも同じ規則を当てる。
+fn validate_field_value(field: &Field, value: &str, line: usize, findings: &mut Vec<Finding>) {
+    // 区切った要素は前後の空白を取り除いてから照合する（R8）
+    let values: Vec<String> = match field.effective_separator() {
+        Some(sep) => split_trimmed(value, sep),
+        None => vec![value.to_string()],
+    };
+    for v in &values {
+        if let Some(pattern) = &field.pattern
+            && !pattern.is_match(v)
+        {
+            findings.push(Finding {
+                kind: FindingKind::FieldPatternMismatch,
+                line: Some(line),
+                detail: format!(
+                    "value \"{v}\" does not match pattern \"{}\"",
+                    pattern.source()
+                ),
+            });
+        }
+        if let Some(allowed) = &field.r#enum
+            && !allowed.iter().any(|e| e == v)
+        {
+            findings.push(Finding {
+                kind: FindingKind::FieldEnumInvalid,
+                line: Some(line),
+                detail: format!("value \"{v}\" is not one of {allowed:?}"),
+            });
+        }
+    }
+}
+
 fn split_trimmed(value: &str, sep: &str) -> Vec<String> {
     value.split(sep).map(|s| s.trim().to_string()).collect()
 }
