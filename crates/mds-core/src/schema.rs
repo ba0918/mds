@@ -206,7 +206,8 @@ pub struct Bullets {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Table {
-    pub header: Vec<String>,
+    /// ヘッダのセル列。宣言しないときはヘッダと列数を検査しない（R11）
+    pub header: Option<Vec<String>>,
     pub required: Option<bool>,
     pub repeat: Option<Repeat>,
     pub extract: Option<Extract>,

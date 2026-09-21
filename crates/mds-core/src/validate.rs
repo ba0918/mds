@@ -617,27 +617,29 @@ fn validate_container(
             Block::Table { header, rows, line } => match rules.table {
                 Some(table) => {
                     table_count += 1;
-                    if header != &table.header {
-                        findings.push(Finding {
-                            kind: FindingKind::TableHeaderMismatch,
-                            line: Some(*line),
-                            detail: format!(
-                                "table header {header:?} does not match expected {:?}",
-                                table.header
-                            ),
-                        });
-                    }
-                    for row in rows {
-                        if row.len() != table.header.len() {
+                    // header を宣言しないときはヘッダと列数を検査しない（R11）
+                    if let Some(expected) = &table.header {
+                        if header != expected {
                             findings.push(Finding {
                                 kind: FindingKind::TableHeaderMismatch,
                                 line: Some(*line),
                                 detail: format!(
-                                    "row has {} columns but the header has {}",
-                                    row.len(),
-                                    table.header.len()
+                                    "table header {header:?} does not match expected {expected:?}"
                                 ),
                             });
+                        }
+                        for row in rows {
+                            if row.len() != expected.len() {
+                                findings.push(Finding {
+                                    kind: FindingKind::TableHeaderMismatch,
+                                    line: Some(*line),
+                                    detail: format!(
+                                        "row has {} columns but the header has {}",
+                                        row.len(),
+                                        expected.len()
+                                    ),
+                                });
+                            }
                         }
                     }
                 }
@@ -2304,6 +2306,29 @@ document:
         assert!(
             !kinds(&findings).contains(&FindingKind::UndeclaredLine),
             "項目に宣言したコードブロックは undeclared_line にしない（R7）"
+        );
+    }
+
+    #[test]
+    fn table_without_declared_header_accepts_any_header() {
+        let schema = "document:\n  sections:\n    - name: 決定表\n      table: {}\n";
+        let doc =
+            "## 決定表\n\n| 項目 | 置く場所 | 文 |\n|---|---|---|\n| 要求 | 節の下 | 持つ |\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::TableHeaderMismatch),
+            "header を宣言しないときはヘッダと列数を検査しない（R11）"
+        );
+    }
+
+    #[test]
+    fn table_without_declared_header_is_still_required() {
+        let schema = "document:\n  sections:\n    - name: 決定表\n      table: {}\n";
+        let doc = "## 決定表\n\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            kinds(&findings).contains(&FindingKind::MissingTable),
+            "header を宣言しなくても表の有無は検査する（R11）"
         );
     }
 }
