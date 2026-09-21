@@ -44,6 +44,7 @@ fn strip_positions(node: &mut Node) {
 mod tests {
     use super::*;
 
+    // @kotowari[REQ-040]
     #[test]
     fn ast_json_is_mdast_shape_with_inline_and_no_position() {
         let src = "# 題名\n\n段落と `インライン` と *強調* と **太字**。\n\n- 箇条書き\n";
@@ -68,6 +69,7 @@ mod tests {
         assert!(children[0]["children"][0].get("position").is_none());
     }
 
+    // @kotowari[REQ-040]
     #[test]
     fn ast_json_excludes_frontmatter_node() {
         let src = "---\n$schema: ../x.yaml\n---\n# 題名\n";

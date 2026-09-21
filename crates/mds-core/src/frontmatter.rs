@@ -156,12 +156,14 @@ mod tests {
         "---\n$schema: ../.mds/schemas/adr.yaml\ntitle: 例\n---\n# 題名\n"
     }
 
+    // @kotowari[REQ-011, REQ-015]
     #[test]
     fn reads_relative_schema_ref_and_ignores_other_keys() {
         let ref_ = frontmatter_schema(adr()).unwrap().unwrap();
         assert_eq!(ref_, SchemaRef::Relative("../.mds/schemas/adr.yaml".into()));
     }
 
+    // @kotowari[REQ-011]
     #[test]
     fn reads_url_schema_ref() {
         let src = "---\n$schema: https://example.com/schema.yaml\n---\n# 題名\n";
@@ -172,53 +174,62 @@ mod tests {
         );
     }
 
+    // @kotowari[REQ-014]
     #[test]
     fn document_without_frontmatter_has_no_schema() {
         assert_eq!(frontmatter_schema("# 題名\n").unwrap(), None);
     }
 
+    // @kotowari[REQ-014]
     #[test]
     fn frontmatter_without_schema_key_has_no_schema() {
         let src = "---\ntitle: 例\n---\n# 題名\n";
         assert_eq!(frontmatter_schema(src).unwrap(), None);
     }
 
+    // @kotowari[REQ-014]
     #[test]
     fn broken_frontmatter_is_an_error() {
         let src = "---\n$schema: [\n---\n# 題名\n";
         assert!(frontmatter_schema(src).is_err());
     }
 
+    // @kotowari[REQ-014]
     #[test]
     fn non_string_schema_is_an_error() {
         let src = "---\n$schema: 42\n---\n# 題名\n";
         assert!(frontmatter_schema(src).is_err());
     }
 
+    // @kotowari[REQ-014]
     #[test]
     fn null_schema_is_an_error() {
         let src = "---\n$schema:\n---\n# 題名\n";
         assert!(frontmatter_schema(src).is_err());
     }
 
+    // @kotowari[REQ-014]
     #[test]
     fn empty_string_schema_is_an_error() {
         let src = "---\n$schema: \"\"\n---\n# 題名\n";
         assert!(frontmatter_schema(src).is_err());
     }
 
+    // @kotowari[REQ-014]
     #[test]
     fn whitespace_only_schema_is_an_error() {
         let src = "---\n$schema: \"   \"\n---\n# 題名\n";
         assert!(frontmatter_schema(src).is_err());
     }
 
+    // @kotowari[REQ-014]
     #[test]
     fn array_schema_is_an_error() {
         let src = "---\n$schema: [a, b]\n---\n# 題名\n";
         assert!(frontmatter_schema(src).is_err());
     }
 
+    // @kotowari[REQ-012, EX-005]
     #[test]
     fn relative_ref_resolves_against_document_location() {
         let doc = std::path::Path::new("fixtures/adr/0001.md");
@@ -230,6 +241,7 @@ mod tests {
         );
     }
 
+    // @kotowari[REQ-011]
     #[test]
     fn url_ref_stays_a_url() {
         let doc = std::path::Path::new("fixtures/adr/0001.md");

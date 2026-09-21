@@ -52,6 +52,7 @@ fn mds() -> Command {
     Command::cargo_bin("mds").unwrap()
 }
 
+// @kotowari[REQ-013]
 #[test]
 fn url_schema_is_fetched_once_and_cached() {
     let (url, counter) = serve_schema();
@@ -96,6 +97,7 @@ fn url_schema_is_fetched_once_and_cached() {
     );
 }
 
+// @kotowari[REQ-011, REQ-013]
 #[test]
 fn url_schema_resolves_the_same_for_all_commands() {
     let (url, counter) = serve_schema();
@@ -122,6 +124,7 @@ fn url_schema_resolves_the_same_for_all_commands() {
     );
 }
 
+// @kotowari[REQ-011, REQ-009]
 #[test]
 fn url_schema_without_cache_and_unreachable_server_stops() {
     let dir = tempfile::tempdir().unwrap();
@@ -145,6 +148,7 @@ fn url_schema_without_cache_and_unreachable_server_stops() {
     assert!(stderr.contains("schema_not_found"));
 }
 
+// @kotowari[REQ-013, EX-006]
 #[test]
 fn corrupted_cache_is_refetched_and_recovers() {
     let (url, counter) = serve_schema();
@@ -182,6 +186,7 @@ fn corrupted_cache_is_refetched_and_recovers() {
     );
 }
 
+// @kotowari[REQ-011, REQ-009]
 #[test]
 fn schema_fetch_times_out_and_stops() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -209,6 +214,7 @@ fn schema_fetch_times_out_and_stops() {
     assert!(stderr.contains("schema_not_found"));
 }
 
+// @kotowari[REQ-011, REQ-009]
 #[test]
 fn schema_response_over_4mib_stops() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
