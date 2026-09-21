@@ -85,6 +85,12 @@ fn main() -> ExitCode {
                 let _ = e.print();
                 return ExitCode::from(0);
             }
+            // サブコマンドを省いたときの clap のメッセージは about の文で始まる。
+            // それをそのまま停止の説明にすると誤りの説明として意味を成さない
+            clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
+                eprintln!("mds: argument_error: no subcommand given (see `mds --help`)");
+                return ExitCode::from(2);
+            }
             _ => {
                 // clap のメッセージは複数行に分かれるので、説明の先頭行だけを
                 // 使って mds の1行の停止理由に合わせる（R19 の argument_error）

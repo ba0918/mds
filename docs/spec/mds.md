@@ -71,7 +71,7 @@ mds --version
 
 ### R2: frontmatter と `$schema` の解決
 
-文書の先頭の frontmatter（`---` で挟んだ YAML ブロック）から `$schema` を読む。`$schema` 以外の frontmatter のキーは無視する。frontmatter が無い文書、または frontmatter に `$schema` キーが無い文書はスキーマを持たない。frontmatter 自体が壊れた YAML のとき、frontmatter が YAML のマッピング（キーと値の集合）でないとき、`$schema` の値が文字列でないとき（null、数値、配列など）、または `$schema` が空のときは停止する（R19）。
+文書の先頭の frontmatter（`---` で挟んだ YAML ブロック）から `$schema` を読む。`$schema` 以外の frontmatter のキーは無視する。frontmatter が無い文書、または frontmatter に `$schema` キーが無い文書はスキーマを持たない。frontmatter 自体が壊れた YAML のとき、frontmatter が YAML のマッピング（キーと値の集合）でないとき、`$schema` の値が文字列でないとき（null、数値、配列など）、または `$schema` が空か空白だけのときは停止する（R19）。
 
 `$schema` の値は相対パスまたは URL。
 

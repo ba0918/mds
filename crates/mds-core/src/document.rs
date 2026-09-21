@@ -259,7 +259,7 @@ fn blocks_from_node(node: &Node, src: &str) -> Vec<Block> {
 /// 表などの子もブロックとして子に残し、閉じた世界の undeclared_line の対象にする。
 /// 先頭がコードブロック・表などで lead の段落が無いとき、後続の段落は文として
 /// 扱う（R10）。文の出現回数・規則（R9）の対象になり、閉じた世界では
-/// undeclared_line になる。`preserve_indent` が真のとき、子の行の元のインデントを
+/// undeclared_line になる。ただし画像だけの段落は文に数えない（R9）。`preserve_indent` が真のとき、子の行の元のインデントを
 /// 保ったまま元の行を取る（仕様 R10 の「そのままのインデントで含める」のため）。
 fn blocks_from_list_item(
     item: &markdown::mdast::ListItem,

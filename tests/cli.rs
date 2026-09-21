@@ -729,3 +729,16 @@ fn decision_record_fixture_passes_check_and_extracts_values() {
         "[example-log.md#S1](./example-log.md#S1)（新しい記録は書かず、既存は残す）"
     );
 }
+
+// @kotowari[REQ-009, REQ-043]
+#[test]
+fn no_subcommand_stops_with_a_usage_hint_not_the_about_text() {
+    let output = mds().output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("Validate Markdown documents against"),
+        "about の文をそのまま停止の説明にしない: {stderr}"
+    );
+    assert!(stderr.contains("--help"), "使い方への案内を出す: {stderr}");
+}

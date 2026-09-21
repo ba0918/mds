@@ -251,4 +251,24 @@ mod tests {
             ResolvedSchema::Url("https://example.com/schema.yaml".into())
         );
     }
+
+    // @kotowari[REQ-014]
+    #[test]
+    fn frontmatter_that_is_not_a_mapping_is_an_error() {
+        let src = "---\nただのスカラ\n---\n# 題名\n";
+        assert!(
+            frontmatter_schema(src).is_err(),
+            "frontmatter が YAML のマッピングでなければ誤りにする（R2）"
+        );
+    }
+
+    // @kotowari[REQ-014]
+    #[test]
+    fn frontmatter_that_is_a_sequence_is_an_error() {
+        let src = "---\n- a\n- b\n---\n# 題名\n";
+        assert!(
+            frontmatter_schema(src).is_err(),
+            "frontmatter が並びでも誤りにする（R2）"
+        );
+    }
 }
