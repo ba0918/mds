@@ -2,6 +2,11 @@
 name = "mds"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ba0918/mds"
+readme = "README.md"
+keywords = ["markdown", "schema", "validation", "cli"]
+categories = ["command-line-utilities", "text-processing"]
 description = "Validate Markdown documents against a YAML schema declared in their frontmatter and extract structured values"
 
 [dependencies]
