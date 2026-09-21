@@ -182,20 +182,23 @@ fn check_document(path: &Path, open_flag: bool) -> Result<Vec<Finding>, Stop> {
     Ok(mds_core::validate::validate(&schema, &document, open))
 }
 
-/// スキーマを解決して文書と共に返す。check・values・ast --schema が共有する。
-fn load_schema_and_document(path: &Path, src: &str) -> Result<(Schema, Document), Stop> {
-    let schema_ref = mds_core::frontmatter::frontmatter_schema(src).map_err(|e| Stop {
+/// frontmatter から `$schema` の参照を読む。`$schema` を持たない文書は `None`。
+/// ファイルを名指しした検査は停止し、ディレクトリ検査は飛ばすので、
+/// 「無い」の扱いは呼び出し側に残す（R2・R20）。
+fn read_schema_ref(path: &Path, src: &str) -> Result<Option<SchemaRef>, Stop> {
+    mds_core::frontmatter::frontmatter_schema(src).map_err(|e| Stop {
         kind: "frontmatter_invalid",
         detail: format!("{}: {}", path.display(), e.0),
-    })?;
-    let schema_ref = schema_ref.ok_or_else(|| Stop {
-        kind: "schema_not_found",
-        detail: format!(
-            "{}: the document has no $schema in frontmatter",
-            path.display()
-        ),
-    })?;
-    let schema_yaml = load_schema_yaml(path, &schema_ref)?;
+    })
+}
+
+/// 解決済みの参照からスキーマを読み、文書と共に返す。
+fn load_schema_and_document_from(
+    path: &Path,
+    src: &str,
+    schema_ref: &SchemaRef,
+) -> Result<(Schema, Document), Stop> {
+    let schema_yaml = load_schema_yaml(path, schema_ref)?;
     let schema = mds_core::schema::parse_schema(&schema_yaml).map_err(|e| Stop {
         kind: "schema_invalid",
         detail: format!("{}: {}", path.display(), e.0),
@@ -205,6 +208,18 @@ fn load_schema_and_document(path: &Path, src: &str) -> Result<(Schema, Document)
         detail: format!("{}: {}", path.display(), e),
     })?;
     Ok((schema, document))
+}
+
+/// スキーマを解決して文書と共に返す。check・values・ast --schema が共有する。
+fn load_schema_and_document(path: &Path, src: &str) -> Result<(Schema, Document), Stop> {
+    let schema_ref = read_schema_ref(path, src)?.ok_or_else(|| Stop {
+        kind: "schema_not_found",
+        detail: format!(
+            "{}: the document has no $schema in frontmatter",
+            path.display()
+        ),
+    })?;
+    load_schema_and_document_from(path, src, &schema_ref)
 }
 
 /// URL スキーマの応答の読み込み上限。壊れたサーバがメモリを食い潰すのを防ぐ。
@@ -388,23 +403,11 @@ fn check_directory(root: &Path, open_flag: bool) -> Result<Vec<(PathBuf, Vec<Fin
         }
         let path = entry.path().to_path_buf();
         let src = read_document(&path)?;
-        let schema_ref = mds_core::frontmatter::frontmatter_schema(&src).map_err(|e| Stop {
-            kind: "frontmatter_invalid",
-            detail: format!("{}: {}", path.display(), e.0),
-        })?;
-        // スキーマを持たない文書は対象外
-        let Some(schema_ref) = schema_ref else {
+        // スキーマを持たない文書は対象外（R20）
+        let Some(schema_ref) = read_schema_ref(&path, &src)? else {
             continue;
         };
-        let schema_yaml = load_schema_yaml(&path, &schema_ref)?;
-        let schema = mds_core::schema::parse_schema(&schema_yaml).map_err(|e| Stop {
-            kind: "schema_invalid",
-            detail: format!("{}: {}", path.display(), e.0),
-        })?;
-        let document = Document::parse(&src).map_err(|e| Stop {
-            kind: "unreadable_file",
-            detail: format!("{}: {}", path.display(), e),
-        })?;
+        let (schema, document) = load_schema_and_document_from(&path, &src, &schema_ref)?;
         let open = open_flag || schema.open;
         let findings = mds_core::validate::validate(&schema, &document, open);
         files.push((path, findings));
