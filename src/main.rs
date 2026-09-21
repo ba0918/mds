@@ -146,7 +146,7 @@ fn run(cli: Cli) -> Result<u8, Stop> {
             let values = mds_core::extract::extract_values(&schema, &document);
             match format.as_str() {
                 "json" => println!("{}", serde_json::to_string_pretty(&values).unwrap()),
-                "text" => print!("{}", mds_core::extract::render_values_text(&values)),
+                "text" => print!("{}", render_values_text(&values)),
                 _ => unreachable!("clap が --format の値を制限する"),
             }
             Ok(0)
@@ -423,6 +423,82 @@ fn read_document(path: &Path) -> Result<String, Stop> {
         kind: "unreadable_file",
         detail: format!("{}: {}", path.display(), e),
     })
+}
+
+/// `values` の text 出力。ネストは2文字のインデント、配列は番号付き。
+/// 抽出（スキーマと文書から JSON を組み立てる）とは別の関心事であり、
+/// 唯一の利用者はこの CLI なので、コアではなくここに置く。
+fn render_values_text(value: &serde_json::Value) -> String {
+    let mut out = String::new();
+    render_text(value, &mut out, 0);
+    out
+}
+
+fn render_text(value: &serde_json::Value, out: &mut String, indent: usize) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, val) in map {
+                match val {
+                    serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+                        push_indent(out, indent);
+                        out.push_str(&format!("{key}:\n"));
+                        render_text(val, out, indent + 2);
+                    }
+                    serde_json::Value::String(s) => {
+                        push_indent(out, indent);
+                        out.push_str(key);
+                        out.push_str(": ");
+                        push_string(out, indent + 2, s);
+                        out.push('\n');
+                    }
+                    other => {
+                        push_indent(out, indent);
+                        out.push_str(&format!("{key}: {other}\n"));
+                    }
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for (i, item) in arr.iter().enumerate() {
+                match item {
+                    serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+                        push_indent(out, indent);
+                        out.push_str(&format!("{}.\n", i + 1));
+                        render_text(item, out, indent + 2);
+                    }
+                    serde_json::Value::String(s) => {
+                        push_indent(out, indent);
+                        out.push_str(&format!("{}. ", i + 1));
+                        push_string(out, indent + 2, s);
+                        out.push('\n');
+                    }
+                    other => {
+                        push_indent(out, indent);
+                        out.push_str(&format!("{}. {other}\n", i + 1));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn push_indent(out: &mut String, indent: usize) {
+    for _ in 0..indent {
+        out.push(' ');
+    }
+}
+
+/// 値の文字列を出力する。改行を含む値は続きの行をインデントし、1件の値として
+/// 読めるようにする。末尾の改行は表示の邪魔なので落とす（json の値は変えない）。
+fn push_string(out: &mut String, indent: usize, s: &str) {
+    for (i, line) in s.trim_end_matches('\n').split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+            push_indent(out, indent);
+        }
+        out.push_str(line);
+    }
 }
 
 #[cfg(test)]

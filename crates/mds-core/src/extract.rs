@@ -46,13 +46,6 @@ pub fn extract_typed(schema: &Schema, document: &Document) -> Value {
     Value::Object(out)
 }
 
-/// `values` の text 出力。ネストは2文字のインデント、配列は番号付き。
-pub fn render_values_text(value: &Value) -> String {
-    let mut out = String::new();
-    render_text(value, &mut out, 0);
-    out
-}
-
 fn extract_title(schema: &Schema, document: &Document, root: &mut Map<String, Value>) {
     let Some(title) = &schema.document.title else {
         return;
@@ -627,73 +620,6 @@ fn place(root: &mut Map<String, Value>, path: &str, value: Value) {
         current = entry.as_object_mut().unwrap();
     }
     current.insert(keys[keys.len() - 1].to_string(), value);
-}
-
-fn render_text(value: &Value, out: &mut String, indent: usize) {
-    match value {
-        Value::Object(map) => {
-            for (key, val) in map {
-                match val {
-                    Value::Object(_) | Value::Array(_) => {
-                        push_indent(out, indent);
-                        out.push_str(&format!("{key}:\n"));
-                        render_text(val, out, indent + 2);
-                    }
-                    Value::String(s) => {
-                        push_indent(out, indent);
-                        out.push_str(key);
-                        out.push_str(": ");
-                        push_string(out, indent + 2, s);
-                        out.push('\n');
-                    }
-                    other => {
-                        push_indent(out, indent);
-                        out.push_str(&format!("{key}: {other}\n"));
-                    }
-                }
-            }
-        }
-        Value::Array(arr) => {
-            for (i, item) in arr.iter().enumerate() {
-                match item {
-                    Value::Object(_) | Value::Array(_) => {
-                        push_indent(out, indent);
-                        out.push_str(&format!("{}.\n", i + 1));
-                        render_text(item, out, indent + 2);
-                    }
-                    Value::String(s) => {
-                        push_indent(out, indent);
-                        out.push_str(&format!("{}. ", i + 1));
-                        push_string(out, indent + 2, s);
-                        out.push('\n');
-                    }
-                    other => {
-                        push_indent(out, indent);
-                        out.push_str(&format!("{}. {other}\n", i + 1));
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn push_indent(out: &mut String, indent: usize) {
-    for _ in 0..indent {
-        out.push(' ');
-    }
-}
-
-/// 値の文字列を出力する。改行を含む値は続きの行をインデントし、1件の値として
-/// 読めるようにする。末尾の改行は表示の邪魔なので落とす（json の値は変えない）。
-fn push_string(out: &mut String, indent: usize, s: &str) {
-    for (i, line) in s.trim_end_matches('\n').split('\n').enumerate() {
-        if i > 0 {
-            out.push('\n');
-            push_indent(out, indent);
-        }
-        out.push_str(line);
-    }
 }
 
 #[cfg(test)]
