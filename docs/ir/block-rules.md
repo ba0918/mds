@@ -12,7 +12,7 @@ $schema: ../../.mds/schemas/ir.yaml
 - 種類: algorithm
 - 出典: docs/decision/records/2026-09-21-mds-spec.md#A10
 - 定義: TBL-007
-- 検証: unit
+- 検証: property
 
 ### REQ-029: フィールド行の値の制約
 

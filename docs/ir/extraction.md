@@ -26,7 +26,7 @@ mds は常に、`抽出`した値を`配置パス`のドット区切りの名前
 
 - 種類: ubiquitous
 - 出典: docs/decision/records/2026-09-21-mds-spec.md#A4
-- 検証: unit
+- 検証: property
 
 mds は常に、`抽出`した値を文字列として出し、日付や数値への型変換をしない。
 
@@ -50,7 +50,8 @@ mds は、`項目`の内側の`フィールド行`、`文`、`箇条書き`、`�
 
 - 種類: ubiquitous
 - 出典: docs/decision/records/2026-09-21-mds-spec.md#A19
-- 検証: unit
+- 検証: review
+- 確かめ方: `mds ast` の出力を mdast（unist）の仕様と突き合わせ、ノードの "type" の名前、"children" の入れ子、インライン要素の種別が準拠していることを確認する。準拠は外部の仕様との一致なので、自分のテストでは見られない
 
 mds は常に、素の構文木を mdast に沿った JSON で出し、インライン要素まで含め、位置情報は含めない。
 
