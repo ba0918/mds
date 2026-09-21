@@ -3,8 +3,8 @@ use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 const SCHEMA_BODY: &str = "document:\n  title:\n    pattern: \"^T-\\\\d{4}:\"\n";

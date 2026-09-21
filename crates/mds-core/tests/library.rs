@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use mds_core::document::Document;
 use mds_core::extract::extract_values;
 use mds_core::finding::FindingKind;
-use mds_core::frontmatter::{frontmatter_schema, resolve_schema, ResolvedSchema, SchemaRef};
+use mds_core::frontmatter::{ResolvedSchema, SchemaRef, frontmatter_schema, resolve_schema};
 use mds_core::schema::parse_schema;
 use mds_core::validate::validate;
 

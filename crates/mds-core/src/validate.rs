@@ -3,8 +3,8 @@
 use crate::document::{Block, Document, Heading, Item};
 use crate::finding::{Finding, FindingKind};
 use crate::schema::{
-    is_declared_field, Bullets, Children, CodeBlock, Field, Item as ItemRule, Preamble, Repeat,
-    Schema, Section, Statement, Table, Title, When,
+    Bullets, Children, CodeBlock, Field, Item as ItemRule, Preamble, Repeat, Schema, Section,
+    Statement, Table, Title, When, is_declared_field,
 };
 use std::collections::HashMap;
 
@@ -132,18 +132,18 @@ fn validate_title(title: &Title, headings: &[Heading], findings: &mut Vec<Findin
         }),
         _ => {
             let heading = &headings[0];
-            if let Some(pattern) = &title.pattern {
-                if !pattern.is_match(&heading.text) {
-                    findings.push(Finding {
-                        kind: FindingKind::TitlePatternMismatch,
-                        line: Some(heading.line),
-                        detail: format!(
-                            "title \"{}\" does not match pattern \"{}\"",
-                            heading.text,
-                            pattern.source()
-                        ),
-                    });
-                }
+            if let Some(pattern) = &title.pattern
+                && !pattern.is_match(&heading.text)
+            {
+                findings.push(Finding {
+                    kind: FindingKind::TitlePatternMismatch,
+                    line: Some(heading.line),
+                    detail: format!(
+                        "title \"{}\" does not match pattern \"{}\"",
+                        heading.text,
+                        pattern.source()
+                    ),
+                });
             }
         }
     }
@@ -172,18 +172,18 @@ fn validate_items(section: &Section, items: &[Item], findings: &mut Vec<Finding>
                 line: Some(item.line),
                 detail: format!("item heading \"{}\" has no \":\" separator", item.id),
             });
-        } else if let Some(id_pattern) = &item_rule.id {
-            if !id_pattern.is_match(&item.id) {
-                findings.push(Finding {
-                    kind: FindingKind::InvalidId,
-                    line: Some(item.line),
-                    detail: format!(
-                        "item id \"{}\" does not match pattern \"{}\"",
-                        item.id,
-                        id_pattern.source()
-                    ),
-                });
-            }
+        } else if let Some(id_pattern) = &item_rule.id
+            && !id_pattern.is_match(&item.id)
+        {
+            findings.push(Finding {
+                kind: FindingKind::InvalidId,
+                line: Some(item.line),
+                detail: format!(
+                    "item id \"{}\" does not match pattern \"{}\"",
+                    item.id,
+                    id_pattern.source()
+                ),
+            });
         }
         let rules = ContainerRules::for_item(item_rule);
         validate_container(&rules, &item.blocks, false, findings);
@@ -319,19 +319,18 @@ fn validate_bullet(
     match rules.bullets {
         Some(bullets) => {
             *bullet_count += 1;
-            if when_allows(bullets.when.as_ref(), rules.fields, blocks) {
-                if let Some(pattern) = &bullets.pattern {
-                    if !pattern.is_match(text) {
-                        findings.push(Finding {
-                            kind: FindingKind::BulletPatternMismatch,
-                            line: Some(line),
-                            detail: format!(
-                                "bullet \"{text}\" does not match pattern \"{}\"",
-                                pattern.source()
-                            ),
-                        });
-                    }
-                }
+            if when_allows(bullets.when.as_ref(), rules.fields, blocks)
+                && let Some(pattern) = &bullets.pattern
+                && !pattern.is_match(text)
+            {
+                findings.push(Finding {
+                    kind: FindingKind::BulletPatternMismatch,
+                    line: Some(line),
+                    detail: format!(
+                        "bullet \"{text}\" does not match pattern \"{}\"",
+                        pattern.source()
+                    ),
+                });
             }
             // 親の bullets 規則が宣言されたとき、子は親の children の宣言に照合する（R13）。
             // when は required / pattern / enum の制約にだけ効く（R15）。照合は常に実行する。
@@ -381,26 +380,26 @@ fn validate_children(block: &Block, children: Option<&Children>, findings: &mut 
                         None => vec![value.clone()],
                     };
                     for v in &values {
-                        if let Some(pattern) = &field.pattern {
-                            if !pattern.is_match(v) {
-                                findings.push(Finding {
-                                    kind: FindingKind::FieldPatternMismatch,
-                                    line: Some(*line),
-                                    detail: format!(
-                                        "value \"{v}\" does not match pattern \"{}\"",
-                                        pattern.source()
-                                    ),
-                                });
-                            }
+                        if let Some(pattern) = &field.pattern
+                            && !pattern.is_match(v)
+                        {
+                            findings.push(Finding {
+                                kind: FindingKind::FieldPatternMismatch,
+                                line: Some(*line),
+                                detail: format!(
+                                    "value \"{v}\" does not match pattern \"{}\"",
+                                    pattern.source()
+                                ),
+                            });
                         }
-                        if let Some(allowed) = &field.r#enum {
-                            if !allowed.iter().any(|e| e == v) {
-                                findings.push(Finding {
-                                    kind: FindingKind::FieldEnumInvalid,
-                                    line: Some(*line),
-                                    detail: format!("value \"{v}\" is not one of {allowed:?}"),
-                                });
-                            }
+                        if let Some(allowed) = &field.r#enum
+                            && !allowed.iter().any(|e| e == v)
+                        {
+                            findings.push(Finding {
+                                kind: FindingKind::FieldEnumInvalid,
+                                line: Some(*line),
+                                detail: format!("value \"{v}\" is not one of {allowed:?}"),
+                            });
                         }
                     }
                 }
@@ -446,19 +445,19 @@ fn validate_children(block: &Block, children: Option<&Children>, findings: &mut 
         }
     }
     // 子は親の本数には数えず、children.bullets の規則で別に数える（R10）
-    if let Some(child_bullets) = children.bullets.as_deref() {
-        if when_allows(child_bullets.when.as_ref(), &children.fields, child_blocks) {
-            let (min, max) = bounds(child_bullets.required, child_bullets.repeat.as_ref());
-            check_occurrence(
-                child_bullet_count,
-                min,
-                max,
-                child_bullets.repeat.is_some(),
-                FindingKind::MissingBullets,
-                "bullets",
-                findings,
-            );
-        }
+    if let Some(child_bullets) = children.bullets.as_deref()
+        && when_allows(child_bullets.when.as_ref(), &children.fields, child_blocks)
+    {
+        let (min, max) = bounds(child_bullets.required, child_bullets.repeat.as_ref());
+        check_occurrence(
+            child_bullet_count,
+            min,
+            max,
+            child_bullets.repeat.is_some(),
+            FindingKind::MissingBullets,
+            "bullets",
+            findings,
+        );
     }
 }
 
@@ -485,19 +484,18 @@ fn validate_child_bullet(
         Block::Field { text, line, .. } => (text.as_str(), *line),
         _ => return,
     };
-    if when_allows(bullets.when.as_ref(), &children.fields, sibling_blocks) {
-        if let Some(pattern) = &bullets.pattern {
-            if !pattern.is_match(text) {
-                findings.push(Finding {
-                    kind: FindingKind::BulletPatternMismatch,
-                    line: Some(line),
-                    detail: format!(
-                        "bullet \"{text}\" does not match pattern \"{}\"",
-                        pattern.source()
-                    ),
-                });
-            }
-        }
+    if when_allows(bullets.when.as_ref(), &children.fields, sibling_blocks)
+        && let Some(pattern) = &bullets.pattern
+        && !pattern.is_match(text)
+    {
+        findings.push(Finding {
+            kind: FindingKind::BulletPatternMismatch,
+            line: Some(line),
+            detail: format!(
+                "bullet \"{text}\" does not match pattern \"{}\"",
+                pattern.source()
+            ),
+        });
     }
     validate_children(block, bullets.children.as_ref(), findings);
 }
@@ -540,28 +538,26 @@ fn validate_container(
                                 None => vec![value.clone()],
                             };
                             for v in &values {
-                                if let Some(pattern) = &field.pattern {
-                                    if !pattern.is_match(v) {
-                                        findings.push(Finding {
-                                            kind: FindingKind::FieldPatternMismatch,
-                                            line: Some(*line),
-                                            detail: format!(
-                                                "value \"{v}\" does not match pattern \"{}\"",
-                                                pattern.source()
-                                            ),
-                                        });
-                                    }
+                                if let Some(pattern) = &field.pattern
+                                    && !pattern.is_match(v)
+                                {
+                                    findings.push(Finding {
+                                        kind: FindingKind::FieldPatternMismatch,
+                                        line: Some(*line),
+                                        detail: format!(
+                                            "value \"{v}\" does not match pattern \"{}\"",
+                                            pattern.source()
+                                        ),
+                                    });
                                 }
-                                if let Some(allowed) = &field.r#enum {
-                                    if !allowed.iter().any(|e| e == v) {
-                                        findings.push(Finding {
-                                            kind: FindingKind::FieldEnumInvalid,
-                                            line: Some(*line),
-                                            detail: format!(
-                                                "value \"{v}\" is not one of {allowed:?}"
-                                            ),
-                                        });
-                                    }
+                                if let Some(allowed) = &field.r#enum
+                                    && !allowed.iter().any(|e| e == v)
+                                {
+                                    findings.push(Finding {
+                                        kind: FindingKind::FieldEnumInvalid,
+                                        line: Some(*line),
+                                        detail: format!("value \"{v}\" is not one of {allowed:?}"),
+                                    });
                                 }
                             }
                         }
@@ -583,28 +579,26 @@ fn validate_container(
                 Some(statement) => {
                     statement_count += 1;
                     if when_allows(statement.when.as_ref(), rules.fields, blocks) {
-                        if let Some(pattern) = &statement.pattern {
-                            if !pattern.is_match(text) {
-                                findings.push(Finding {
-                                    kind: FindingKind::StatementPatternMismatch,
-                                    line: Some(*line),
-                                    detail: format!(
-                                        "statement \"{text}\" does not match pattern \"{}\"",
-                                        pattern.source()
-                                    ),
-                                });
-                            }
+                        if let Some(pattern) = &statement.pattern
+                            && !pattern.is_match(text)
+                        {
+                            findings.push(Finding {
+                                kind: FindingKind::StatementPatternMismatch,
+                                line: Some(*line),
+                                detail: format!(
+                                    "statement \"{text}\" does not match pattern \"{}\"",
+                                    pattern.source()
+                                ),
+                            });
                         }
-                        if let Some(allowed) = &statement.r#enum {
-                            if !allowed.iter().any(|e| e == text) {
-                                findings.push(Finding {
-                                    kind: FindingKind::StatementEnumInvalid,
-                                    line: Some(*line),
-                                    detail: format!(
-                                        "statement \"{text}\" is not one of {allowed:?}"
-                                    ),
-                                });
-                            }
+                        if let Some(allowed) = &statement.r#enum
+                            && !allowed.iter().any(|e| e == text)
+                        {
+                            findings.push(Finding {
+                                kind: FindingKind::StatementEnumInvalid,
+                                line: Some(*line),
+                                detail: format!("statement \"{text}\" is not one of {allowed:?}"),
+                            });
                         }
                     }
                 }
@@ -652,17 +646,17 @@ fn validate_container(
             Block::Code { lang, value, line } => match rules.codeblock {
                 Some(codeblock) => {
                     code_count += 1;
-                    if let Some(expected) = &codeblock.lang {
-                        if lang.as_deref() != Some(expected.as_str()) {
-                            findings.push(Finding {
-                                kind: FindingKind::CodeblockLangMismatch,
-                                line: Some(*line),
-                                detail: format!(
-                                    "code block language {:?} does not match \"{expected}\"",
-                                    lang
-                                ),
-                            });
-                        }
+                    if let Some(expected) = &codeblock.lang
+                        && lang.as_deref() != Some(expected.as_str())
+                    {
+                        findings.push(Finding {
+                            kind: FindingKind::CodeblockLangMismatch,
+                            line: Some(*line),
+                            detail: format!(
+                                "code block language {:?} does not match \"{expected}\"",
+                                lang
+                            ),
+                        });
                     }
                     if let Some(patterns) = &codeblock.lines {
                         for (i, code_line) in value.lines().enumerate() {
@@ -715,33 +709,33 @@ fn validate_container(
             );
         }
     }
-    if let Some(statement) = rules.statement {
-        if when_allows(statement.when.as_ref(), rules.fields, blocks) {
-            let (min, max) = bounds(statement.required, statement.repeat.as_ref());
-            check_occurrence(
-                statement_count,
-                min,
-                max,
-                statement.repeat.is_some(),
-                FindingKind::MissingStatement,
-                "statement",
-                findings,
-            );
-        }
+    if let Some(statement) = rules.statement
+        && when_allows(statement.when.as_ref(), rules.fields, blocks)
+    {
+        let (min, max) = bounds(statement.required, statement.repeat.as_ref());
+        check_occurrence(
+            statement_count,
+            min,
+            max,
+            statement.repeat.is_some(),
+            FindingKind::MissingStatement,
+            "statement",
+            findings,
+        );
     }
-    if let Some(bullets) = rules.bullets {
-        if when_allows(bullets.when.as_ref(), rules.fields, blocks) {
-            let (min, max) = bounds(bullets.required, bullets.repeat.as_ref());
-            check_occurrence(
-                bullet_count,
-                min,
-                max,
-                bullets.repeat.is_some(),
-                FindingKind::MissingBullets,
-                "bullets",
-                findings,
-            );
-        }
+    if let Some(bullets) = rules.bullets
+        && when_allows(bullets.when.as_ref(), rules.fields, blocks)
+    {
+        let (min, max) = bounds(bullets.required, bullets.repeat.as_ref());
+        check_occurrence(
+            bullet_count,
+            min,
+            max,
+            bullets.repeat.is_some(),
+            FindingKind::MissingBullets,
+            "bullets",
+            findings,
+        );
     }
     if let Some(table) = rules.table {
         let (min, max) = bounds(table.required, table.repeat.as_ref());
@@ -771,15 +765,15 @@ fn validate_container(
     if rules.ordered {
         let mut prev: Option<usize> = None;
         for (idx, line) in &ordered_seen {
-            if let Some(prev_idx) = prev {
-                if *idx < prev_idx {
-                    findings.push(Finding {
-                        kind: FindingKind::FieldOrderMismatch,
-                        line: Some(*line),
-                        detail: "fields are not in the declared order".into(),
-                    });
-                    break;
-                }
+            if let Some(prev_idx) = prev
+                && *idx < prev_idx
+            {
+                findings.push(Finding {
+                    kind: FindingKind::FieldOrderMismatch,
+                    line: Some(*line),
+                    detail: "fields are not in the declared order".into(),
+                });
+                break;
             }
             prev = Some(*idx);
         }
@@ -850,14 +844,14 @@ fn check_occurrence(
                 detail: format!("{what} is required but missing"),
             });
         }
-    } else if let Some(max) = max {
-        if count > max {
-            findings.push(Finding {
-                kind: FindingKind::RepeatMaxExceeded,
-                line: None,
-                detail: format!("{what} appears {count} time(s), maximum is {max}"),
-            });
-        }
+    } else if let Some(max) = max
+        && count > max
+    {
+        findings.push(Finding {
+            kind: FindingKind::RepeatMaxExceeded,
+            line: None,
+            detail: format!("{what} appears {count} time(s), maximum is {max}"),
+        });
     }
 }
 

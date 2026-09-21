@@ -1,7 +1,7 @@
 //! frontmatter から `$schema` を読み、参照先を解決する。
 
-use gray_matter::engine::YAML;
 use gray_matter::Matter;
+use gray_matter::engine::YAML;
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 use std::path::{Component, Path, PathBuf};

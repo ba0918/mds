@@ -1,6 +1,6 @@
 //! Markdown を mdast に解析し、JSON へ写す。
 
-use markdown::{mdast::Node, to_mdast, Constructs, ParseOptions};
+use markdown::{Constructs, ParseOptions, mdast::Node, to_mdast};
 use serde_json::Value;
 
 /// Markdown を mdast の木に解析する。GFM（表）と frontmatter の構文を有効にする。

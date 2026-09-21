@@ -1,9 +1,9 @@
 //! スキーマの `extract` に沿って値を組み立てる。
 
-use crate::document::{join_continuation, Block, Document, Item as DocItem, Section as DocSection};
+use crate::document::{Block, Document, Item as DocItem, Section as DocSection, join_continuation};
 use crate::schema::{
-    is_declared_field, item_internals_declare_extract, Bullets, Children, CodeBlock, Extract,
-    Extracts, Field, OfKind, Schema, Statement, Table,
+    Bullets, Children, CodeBlock, Extract, Extracts, Field, OfKind, Schema, Statement, Table,
+    is_declared_field, item_internals_declare_extract,
 };
 use serde_json::{Map, Value};
 
@@ -119,29 +119,29 @@ fn extract_section(
     extract_table(def.table.as_ref(), &blocks, root);
     extract_codeblock(def.codeblock.as_ref(), &blocks, root);
 
-    if let Some(item) = &def.item {
-        if let Some(extract) = &item.extract {
-            let items: Vec<&DocItem> = occurrences.iter().flat_map(|s| s.items.iter()).collect();
-            if items.is_empty() {
-                // 0件のときはキーを省略する（R16）
-            } else {
-                // 内部が extract を宣言したか、項目に of を添えた書式があれば
-                // 項目ごとのオブジェクトにする（R16）
-                let as_object = item_internals_declare_extract(item) || extract.has_of();
-                let one = |i: &DocItem| {
-                    if as_object {
-                        item_object(i, item)
-                    } else {
-                        item_value(i, item)
-                    }
-                };
-                let value = if item.repeat.is_some() {
-                    Value::Array(items.iter().map(|i| one(i)).collect())
+    if let Some(item) = &def.item
+        && let Some(extract) = &item.extract
+    {
+        let items: Vec<&DocItem> = occurrences.iter().flat_map(|s| s.items.iter()).collect();
+        if items.is_empty() {
+            // 0件のときはキーを省略する（R16）
+        } else {
+            // 内部が extract を宣言したか、項目に of を添えた書式があれば
+            // 項目ごとのオブジェクトにする（R16）
+            let as_object = item_internals_declare_extract(item) || extract.has_of();
+            let one = |i: &DocItem| {
+                if as_object {
+                    item_object(i, item)
                 } else {
-                    one(items[0])
-                };
-                place_all(root, extract, &Extracted::of_value(value));
-            }
+                    item_value(i, item)
+                }
+            };
+            let value = if item.repeat.is_some() {
+                Value::Array(items.iter().map(|i| one(i)).collect())
+            } else {
+                one(items[0])
+            };
+            place_all(root, extract, &Extracted::of_value(value));
         }
     }
 }
@@ -332,22 +332,22 @@ fn extract_child_fields(children: &Children, blocks: &[&Block], root: &mut Map<S
     }
     // 子の箇条書きの下の children に再帰する。子の箇条書きは Bullet か、この
     // レベルの宣言と一致しない `- 名前: 値` 行（箇条書きとして扱う行）である（R8）
-    if let Some(child_bullets) = children.bullets.as_deref() {
-        if let Some(grandchildren) = &child_bullets.children {
-            let declared: Vec<&str> = children.fields.iter().map(|f| f.name.as_str()).collect();
-            let bullet_blocks: Vec<&Block> = blocks
-                .iter()
-                .flat_map(|b| b.children().iter())
-                .filter(|c| {
-                    matches!(c, Block::Bullet { .. })
-                        || matches!(
-                            c,
-                            Block::Field { name, .. } if !declared.contains(&name.as_str())
-                        )
-                })
-                .collect();
-            extract_child_fields(grandchildren, &bullet_blocks, root);
-        }
+    if let Some(child_bullets) = children.bullets.as_deref()
+        && let Some(grandchildren) = &child_bullets.children
+    {
+        let declared: Vec<&str> = children.fields.iter().map(|f| f.name.as_str()).collect();
+        let bullet_blocks: Vec<&Block> = blocks
+            .iter()
+            .flat_map(|b| b.children().iter())
+            .filter(|c| {
+                matches!(c, Block::Bullet { .. })
+                    || matches!(
+                        c,
+                        Block::Field { name, .. } if !declared.contains(&name.as_str())
+                    )
+            })
+            .collect();
+        extract_child_fields(grandchildren, &bullet_blocks, root);
     }
 }
 

@@ -713,7 +713,9 @@ fn decision_record_fixture_passes_check_and_extracts_values() {
     assert_eq!(decisions.len(), 2);
     assert_eq!(
         decisions[0],
-        serde_json::json!("- 決定1 これは実在しないダミーの決定である。判断の記録の書式を検査するためにだけ存在する")
+        serde_json::json!(
+            "- 決定1 これは実在しないダミーの決定である。判断の記録の書式を検査するためにだけ存在する"
+        )
     );
     assert_eq!(
         decisions[1],

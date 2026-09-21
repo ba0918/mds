@@ -237,10 +237,10 @@ pub struct Repeat {
 
 impl Repeat {
     fn validate(&self) -> Result<(), SchemaError> {
-        if let (Some(min), Some(max)) = (self.min, self.max) {
-            if min > max {
-                return Err(SchemaError("repeat min is greater than max".into()));
-            }
+        if let (Some(min), Some(max)) = (self.min, self.max)
+            && min > max
+        {
+            return Err(SchemaError("repeat min is greater than max".into()));
         }
         Ok(())
     }
@@ -566,17 +566,17 @@ fn reject_item_only_of(extract: Option<&Extracts>, node: &str) -> Result<(), Sch
         return Ok(());
     };
     for e in extracts.iter() {
-        if let Extract::Of { of, .. } = e {
-            if matches!(of, OfKind::Id | OfKind::Name) {
-                return Err(SchemaError(format!(
-                    "{node} extract cannot use of: {}",
-                    match of {
-                        OfKind::Id => "id",
-                        OfKind::Name => "name",
-                        OfKind::Line => "line",
-                    }
-                )));
-            }
+        if let Extract::Of { of, .. } = e
+            && matches!(of, OfKind::Id | OfKind::Name)
+        {
+            return Err(SchemaError(format!(
+                "{node} extract cannot use of: {}",
+                match of {
+                    OfKind::Id => "id",
+                    OfKind::Name => "name",
+                    OfKind::Line => "line",
+                }
+            )));
         }
     }
     Ok(())
