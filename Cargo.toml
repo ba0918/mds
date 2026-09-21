@@ -10,7 +10,7 @@ categories = ["command-line-utilities", "text-processing"]
 description = "Validate Markdown documents against a YAML schema declared in their frontmatter and extract structured values"
 
 [dependencies]
-mds-core = { path = "crates/mds-core" }
+mds-core = { path = "crates/mds-core", version = "0.1.0" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
