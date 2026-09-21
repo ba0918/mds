@@ -501,6 +501,12 @@ fn element_from_line(
 
 /// 継続段落を `- ` 行に改行で続けてつなぐ。複数あるときは空行でつなぐ（R10）。
 /// フィールド行と箇条書きの抽出要素が共有する結合規則。
+///
+/// R10 / R16 の抽出要素の組み立ては、ここと `extract.rs` に分かれている。
+/// この関数と `bullet_element` / `field_element` は `Block` の中身だけで
+/// 決まる部分を持ち、子の箇条書きの取り込みと宣言済み子フィールドの除外は
+/// `Children` の宣言が要るため `extract.rs` の `element_with_children` と
+/// `body_from_blocks` が担う。連結規則を変えるときは両方を見る。
 pub(crate) fn join_continuation(out: &mut String, continuation: &[String]) {
     if !continuation.is_empty() {
         out.push('\n');
