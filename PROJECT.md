@@ -5,7 +5,21 @@
 `mds` is a CLI that validates Markdown documents against a YAML schema declared in the
 document's frontmatter (`$schema`) and extracts structured values from them. It exists so that
 the format of LLM-written Markdown can be pinned down mechanically. ADR is the first
-application. The specification is `docs/spec/mds.md`.
+application.
+
+## Specification
+
+The specification lives in two places, and both are kept up to date:
+
+- `docs/spec/mds.md` — the prose specification, written for people.
+- `docs/ir/` — the same specification normalised into kotowari's IR form, so that it can be
+  checked mechanically. Each IR document declares a schema from `.mds/schemas/` in its
+  `$schema` frontmatter, so it passes both `kotowari check` and `mds check docs/ir`.
+
+Rules the IR does not yet carry are recorded as gaps in `docs/ir/FLAGS.md`. Decisions the IR
+cites as sources live in `docs/decision/records/`.
+
+Read the `kotowari` skill before writing or revising an IR document.
 
 ## Stack and layout
 
@@ -27,6 +41,8 @@ The core is kept separate from the CLI so that it can be reused, for example ins
 | Lint | `cargo clippy` |
 | Run locally | `cargo run -- <args>` |
 | Quality gates (pre-commit) | `lefthook run pre-commit --no-auto-install` |
+| Check the IR against its schemas | `cargo run -- check docs/ir` |
+| Check the IR against the spec form | `kotowari check` |
 
 lefthook runs the quality gates (fmt / clippy / test) on every `pre-commit`, as defined in
 `lefthook.yml`. Do not run `lefthook install` on a machine whose global pre-commit hook already
