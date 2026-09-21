@@ -31,6 +31,8 @@ conventions that apply only here — lives in `PROJECT.md`. Read it before makin
 
 ## kotowari
 
-このプロジェクトの仕様は IR（`docs/ir/`）で管理する。brainstorm、plan、cycle、implement の各席では `kotowari` スキルを読み、場面に応じた reference に従う。
+このプロジェクトの仕様は2か所にある。`docs/spec/mds.md` が人間向けの仕様、`docs/ir/` がそれを kotowari の IR 形式へ写した、機械検査できる正規化である。両方を更新する。
 
-IR の文書は `$schema` で `.mds/schemas/` のスキーマを宣言し、`kotowari check` と `mds check docs/ir` の両方を通す。
+IR の文書は `$schema` で `.mds/schemas/` のスキーマを宣言し、`kotowari check` と `mds check docs/ir` の両方を通す。IR へ写しきれていない箇所は `docs/ir/FLAGS.md` に記録する。
+
+brainstorm、plan、cycle、implement の各席では `kotowari` スキルを読み、場面に応じた reference に従う。
