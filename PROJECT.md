@@ -54,6 +54,31 @@ On a machine without such a global hook, run `lefthook install` once to generate
 With nothing staged, the gates are skipped and the run reports success, so run it with at least
 one staged change to actually verify the gates.
 
+## Release
+
+The canonical version is `[workspace.package] version` in the root `Cargo.toml`. Both crates
+inherit it with `version.workspace = true`. One declaration follows it rather than inheriting:
+the `version` requirement on the `mds-core` path dependency, which exists so that the crate stays
+packageable. `scripts/check-version.sh` checks that they agree, and CI runs it on every push.
+
+Releases are GitHub releases only. The crate names `mds` and `mds-core` are taken on crates.io by
+unrelated projects, so nothing is published to a registry; `cargo install --git` is the install
+path. Publishing to a registry would need different package names first.
+
+To cut a release:
+
+```console
+$ scripts/release.sh 0.2.0
+```
+
+It sets the version, promotes the `## Unreleased` section of `CHANGELOG.md` under that version
+with a comparison link, runs the gates, commits, tags and pushes. Pushing the tag triggers
+`.github/workflows/release.yml`, which re-checks the tag against the manifest, re-runs the gates
+and creates the GitHub release from the changelog section.
+
+Write the changelog entry when the change is made, under `## Unreleased`. A published tag is
+fixed: correct a released state by releasing a new version, never by moving the tag.
+
 ## Conventions specific to this project
 
 Language rules:

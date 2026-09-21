@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: publish the GitHub release for the tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      # The tag names the release; the manifest declares what was built. A tag
+      # that disagrees with the manifest would publish a version nobody made.
+      - name: the tag agrees with the manifest
+        run: ./scripts/check-version.sh "${GITHUB_REF_NAME}"
+
+      # A tag publishes a verified release; it does not start one. The gates
+      # run here so that a tag pushed from an unverified state fails loudly
+      # before a release exists.
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+      - run: cargo run --locked -- check ./
+
+      - name: the changelog has a section for this version
+        run: |
+          body=$(./scripts/changelog-section.sh "${GITHUB_REF_NAME}")
+          if [ -z "$body" ]; then
+            echo "CHANGELOG.md has no section for ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+          {
+            echo 'BODY<<CHANGELOG_EOF'
+            echo "$body"
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_ENV"
+
+      - name: create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "${BODY}" \
+            --verify-tag
