@@ -525,27 +525,7 @@ fn validate_container(
                 Some(statement) => {
                     statement_count += 1;
                     if when_allows(statement.when.as_ref(), rules.fields, blocks) {
-                        if let Some(pattern) = &statement.pattern
-                            && !pattern.is_match(text)
-                        {
-                            findings.push(Finding {
-                                kind: FindingKind::StatementPatternMismatch,
-                                line: Some(*line),
-                                detail: format!(
-                                    "statement \"{text}\" does not match pattern \"{}\"",
-                                    pattern.source()
-                                ),
-                            });
-                        }
-                        if let Some(allowed) = &statement.r#enum
-                            && !allowed.iter().any(|e| e == text)
-                        {
-                            findings.push(Finding {
-                                kind: FindingKind::StatementEnumInvalid,
-                                line: Some(*line),
-                                detail: format!("statement \"{text}\" is not one of {allowed:?}"),
-                            });
-                        }
+                        validate_statement_value(statement, text, *line, findings);
                     }
                 }
                 None => {
@@ -557,31 +537,7 @@ fn validate_container(
             Block::Table { header, rows, line } => match rules.table {
                 Some(table) => {
                     table_count += 1;
-                    // header を宣言しないときはヘッダと列数を検査しない（R11）
-                    if let Some(expected) = &table.header {
-                        if header != expected {
-                            findings.push(Finding {
-                                kind: FindingKind::TableHeaderMismatch,
-                                line: Some(*line),
-                                detail: format!(
-                                    "table header {header:?} does not match expected {expected:?}"
-                                ),
-                            });
-                        }
-                        for row in rows {
-                            if row.len() != expected.len() {
-                                findings.push(Finding {
-                                    kind: FindingKind::TableHeaderMismatch,
-                                    line: Some(*line),
-                                    detail: format!(
-                                        "row has {} columns but the header has {}",
-                                        row.len(),
-                                        expected.len()
-                                    ),
-                                });
-                            }
-                        }
-                    }
+                    validate_table_shape(table, header, rows, *line, findings);
                 }
                 None => {
                     if !open {
@@ -592,36 +548,7 @@ fn validate_container(
             Block::Code { lang, value, line } => match rules.codeblock {
                 Some(codeblock) => {
                     code_count += 1;
-                    if let Some(expected) = &codeblock.lang
-                        && lang.as_deref() != Some(expected.as_str())
-                    {
-                        findings.push(Finding {
-                            kind: FindingKind::CodeblockLangMismatch,
-                            line: Some(*line),
-                            detail: format!(
-                                "code block language {:?} does not match \"{expected}\"",
-                                lang
-                            ),
-                        });
-                    }
-                    if let Some(patterns) = &codeblock.lines {
-                        for (i, code_line) in value.lines().enumerate() {
-                            let code_line = code_line.trim();
-                            if code_line.is_empty() {
-                                continue;
-                            }
-                            if !patterns.iter().any(|p| p.is_match(code_line)) {
-                                findings.push(Finding {
-                                    kind: FindingKind::CodeblockLineMismatch,
-                                    line: Some(*line),
-                                    detail: format!(
-                                        "line {} does not match any allowed pattern",
-                                        i + 1
-                                    ),
-                                });
-                            }
-                        }
-                    }
+                    validate_codeblock_shape(codeblock, lang.as_deref(), value, *line, findings);
                 }
                 None => {
                     if !open {
@@ -728,6 +655,106 @@ fn validate_container(
 
 /// `separator` で分けた要素を、前後の空白を取り除いて返す。空の要素は
 /// 空文字列として残す（R8）。
+/// 文を、宣言された pattern・enum に照らす（R9）。
+fn validate_statement_value(
+    statement: &Statement,
+    text: &str,
+    line: usize,
+    findings: &mut Vec<Finding>,
+) {
+    if let Some(pattern) = &statement.pattern
+        && !pattern.is_match(text)
+    {
+        findings.push(Finding {
+            kind: FindingKind::StatementPatternMismatch,
+            line: Some(line),
+            detail: format!(
+                "statement \"{text}\" does not match pattern \"{}\"",
+                pattern.source()
+            ),
+        });
+    }
+    if let Some(allowed) = &statement.r#enum
+        && !allowed.iter().any(|e| e == text)
+    {
+        findings.push(Finding {
+            kind: FindingKind::StatementEnumInvalid,
+            line: Some(line),
+            detail: format!("statement \"{text}\" is not one of {allowed:?}"),
+        });
+    }
+}
+
+/// 表を、宣言されたヘッダに照らす（R11）。header を宣言しないときは
+/// ヘッダも列数も検査しない。
+fn validate_table_shape(
+    table: &Table,
+    header: &[String],
+    rows: &[Vec<String>],
+    line: usize,
+    findings: &mut Vec<Finding>,
+) {
+    let Some(expected) = &table.header else {
+        return;
+    };
+    if header != expected.as_slice() {
+        findings.push(Finding {
+            kind: FindingKind::TableHeaderMismatch,
+            line: Some(line),
+            detail: format!("table header {header:?} does not match expected {expected:?}"),
+        });
+    }
+    for row in rows {
+        if row.len() != expected.len() {
+            findings.push(Finding {
+                kind: FindingKind::TableHeaderMismatch,
+                line: Some(line),
+                detail: format!(
+                    "row has {} columns but the header has {}",
+                    row.len(),
+                    expected.len()
+                ),
+            });
+        }
+    }
+}
+
+/// コードブロックを、宣言された言語と行の pattern に照らす（R12）。
+/// 空行は行の照合の対象外。
+fn validate_codeblock_shape(
+    codeblock: &CodeBlock,
+    lang: Option<&str>,
+    value: &str,
+    line: usize,
+    findings: &mut Vec<Finding>,
+) {
+    if let Some(expected) = &codeblock.lang
+        && lang != Some(expected.as_str())
+    {
+        findings.push(Finding {
+            kind: FindingKind::CodeblockLangMismatch,
+            line: Some(line),
+            detail: format!("code block language {lang:?} does not match \"{expected}\""),
+        });
+    }
+    let Some(patterns) = &codeblock.lines else {
+        return;
+    };
+    for (i, code_line) in value.lines().enumerate() {
+        let code_line = code_line.trim();
+        if code_line.is_empty() {
+            continue;
+        }
+        if !patterns.iter().any(|p| p.is_match(code_line)) {
+            findings.push(Finding {
+                kind: FindingKind::CodeblockLineMismatch,
+                line: Some(line),
+                detail: format!("line {} does not match any allowed pattern", i + 1),
+            });
+        }
+    }
+}
+
 /// フィールド行の値を、宣言された区切り・pattern・enum に照らす（R8）。
 /// 前置部と節のフィールド行にも、箇条書きの子フィールド行にも同じ規則を当てる。
 fn validate_field_value(field: &Field, value: &str, line: usize, findings: &mut Vec<Finding>) {
