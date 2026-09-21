@@ -28,3 +28,9 @@ governs.
 
 Project-specific context — what this repository is, how to build and test it, and the
 conventions that apply only here — lives in `PROJECT.md`. Read it before making changes.
+
+## kotowari
+
+このプロジェクトの仕様は IR（`docs/ir/`）で管理する。brainstorm、plan、cycle、implement の各席では `kotowari` スキルを読み、場面に応じた reference に従う。
+
+IR の文書は `$schema` で `.mds/schemas/` のスキーマを宣言し、`kotowari check` と `mds check docs/ir` の両方を通す。
