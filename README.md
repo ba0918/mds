@@ -19,7 +19,7 @@ A document points at its schema from the frontmatter:
 
 ```markdown
 ---
-$schema: ../.mds/schemas/adr.yaml
+$schema: ../../.mds/schemas/adr.yaml
 ---
 # ADR-0001: Use a YAML schema
 
