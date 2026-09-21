@@ -9,4 +9,7 @@ document:
     statement:
       required: false
       extract: scope
+    table:
+      header: [用語, 意味, 出典]
+      extract: glossary
   sections: []
