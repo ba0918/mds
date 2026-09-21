@@ -232,8 +232,8 @@ impl<'a> ContainerRules<'a> {
                 ordered: p.ordered,
                 statement: p.statement.as_ref(),
                 bullets: p.bullets.as_ref(),
-                table: None,
-                codeblock: None,
+                table: p.table.as_ref(),
+                codeblock: p.codeblock.as_ref(),
             },
             None => Self::empty(),
         }
@@ -2329,6 +2329,28 @@ document:
         assert!(
             kinds(&findings).contains(&FindingKind::MissingTable),
             "header を宣言しなくても表の有無は検査する（R11）"
+        );
+    }
+
+    #[test]
+    fn table_declared_on_the_preamble_is_not_undeclared() {
+        let schema = "document:\n  preamble:\n    table:\n      header: [用語, 意味]\n";
+        let doc = "# 用語集\n\n| 用語 | 意味 |\n|---|---|\n| 印 | テストの印 |\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "前置部に宣言した表は undeclared_line にしない（R5）"
+        );
+    }
+
+    #[test]
+    fn code_block_declared_on_the_preamble_is_not_undeclared() {
+        let schema = "document:\n  preamble:\n    codeblock:\n      lang: gherkin\n";
+        let doc = "# 具体例\n\n```gherkin\nScenario: 印を書く\n```\n";
+        let findings = validate_src(schema, doc, false);
+        assert!(
+            !kinds(&findings).contains(&FindingKind::UndeclaredLine),
+            "前置部に宣言したコードブロックは undeclared_line にしない（R5）"
         );
     }
 }

@@ -87,6 +87,8 @@ pub struct Preamble {
     pub fields: Vec<Field>,
     pub statement: Option<Statement>,
     pub bullets: Option<Bullets>,
+    pub table: Option<Table>,
+    pub codeblock: Option<CodeBlock>,
     /// フィールド行の並び順を強制する。R8
     #[serde(default)]
     pub ordered: bool,
@@ -315,6 +317,8 @@ fn validate_preamble(preamble: &Preamble) -> Result<(), SchemaError> {
     validate_fields(&preamble.fields)?;
     validate_statement(preamble.statement.as_ref())?;
     validate_bullets(preamble.bullets.as_ref(), false, false)?;
+    validate_table(preamble.table.as_ref(), false)?;
+    validate_codeblock(preamble.codeblock.as_ref(), false)?;
     Ok(())
 }
 

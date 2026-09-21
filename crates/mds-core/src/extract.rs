@@ -20,6 +20,8 @@ pub fn extract_values(schema: &Schema, document: &Document) -> Value {
             &blocks,
             &mut root,
         );
+        extract_table(preamble.table.as_ref(), &blocks, &mut root);
+        extract_codeblock(preamble.codeblock.as_ref(), &blocks, &mut root);
     }
     for def in &schema.document.sections {
         extract_section(def, document, &mut root);
@@ -1492,6 +1494,18 @@ document:
             v["tables"],
             json!(["TBL-001: 名前\n- 出典: docs/a.md"]),
             "項目の抽出の本文に表を含めない（R16）"
+        );
+    }
+
+    #[test]
+    fn preamble_table_is_extracted_as_row_objects() {
+        let schema = "document:\n  preamble:\n    table:\n      header: [用語, 意味]\n      extract: glossary\n";
+        let doc = "# 用語集\n\n| 用語 | 意味 |\n|---|---|\n| 印 | テストの印 |\n";
+        let v = values(schema, doc);
+        assert_eq!(
+            v["glossary"],
+            json!([{"用語": "印", "意味": "テストの印"}]),
+            "前置部の表もヘッダをキーにしたオブジェクトの配列で抽出する（R5・R16）"
         );
     }
 }
