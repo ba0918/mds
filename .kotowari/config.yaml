@@ -10,7 +10,7 @@ tests:
     - "crates/**/*.rs"
   rust:
     attributes: []
-    macros: []
+    macros: [proptest]
 limits:
   lines: 200
   requirements: 10
