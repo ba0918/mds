@@ -7,6 +7,8 @@ that asks of you.
 
 ## Unreleased
 
+## [0.1.0] - 2026-09-22
+
 First release. `mds` validates a Markdown document against a YAML schema the document declares
 itself, and hands its contents back as structured data.
 
@@ -44,3 +46,5 @@ $ cargo install --git https://github.com/ba0918/mds
 ```
 
 Requires Rust 1.89 or newer.
+
+[0.1.0]: https://github.com/ba0918/mds/releases/tag/v0.1.0
