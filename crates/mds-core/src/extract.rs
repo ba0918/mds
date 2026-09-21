@@ -1483,8 +1483,10 @@ document:
           - name: 出典
         table:
           header: [用語, 意味]
+        codeblock:
+          lang: gherkin
 "#;
-        let doc = "## 決定表\n\n### TBL-001: 名前\n\n- 出典: docs/a.md\n\n| 用語 | 意味 |\n|---|---|\n| 印 | テストの印 |\n";
+        let doc = "## 決定表\n\n### TBL-001: 名前\n\n- 出典: docs/a.md\n\n| 用語 | 意味 |\n|---|---|\n| 印 | テストの印 |\n\n```gherkin\nScenario: 印を書く\n```\n";
         let v = values(schema, doc);
         assert_eq!(
             v["tables"],
