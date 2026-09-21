@@ -55,6 +55,22 @@ mds は、`項目`の内側の`フィールド行`、`文`、`箇条書き`、`�
 
 mds は常に、素の構文木を mdast に沿った JSON で出し、インライン要素まで含め、位置情報は含めない。
 
+### REQ-045: 区切り文字を宣言したフィールド行の抽出
+
+- 種類: ubiquitous
+- 出典: docs/decision/records/2026-09-21-mds-spec.md#A4, docs/decision/records/2026-09-21-mds-spec.md#A10
+- 検証: unit
+
+mds は常に、区切り文字を宣言した`フィールド行`を`出現回数`の宣言に関わらず配列へ`抽出`し、`出現回数`の範囲も宣言したときは配列の配列にする。
+
+### REQ-046: 区切りと継続段落の順序
+
+- 種類: ubiquitous
+- 出典: docs/decision/records/2026-09-21-mds-spec.md#A4, docs/decision/records/2026-09-21-mds-spec.md#A11
+- 検証: unit
+
+mds は常に、区切り文字による分割を`継続段落`を含めない値だけに対して行い、`継続段落`は分割した末尾の要素に改行を挟んで付ける。
+
 ## 決定表
 
 ### TBL-008: 抽出の形

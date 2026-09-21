@@ -54,7 +54,7 @@ fn ast_outputs_mdast_json_for_the_adr_fixture() {
     assert!(json["children"][0].get("position").is_none());
 }
 
-// @kotowari[REQ-009]
+// @kotowari[REQ-009, REQ-042, REQ-043]
 #[test]
 fn ast_with_format_text_stops_with_argument_error() {
     let mut cmd = Command::cargo_bin("mds").unwrap();
@@ -65,7 +65,7 @@ fn ast_with_format_text_stops_with_argument_error() {
     assert!(stderr.contains("mds: argument_error:"), "stderr: {stderr}");
 }
 
-// @kotowari[REQ-009]
+// @kotowari[REQ-009, REQ-042]
 #[test]
 fn unknown_flag_stops_with_argument_error() {
     let output = mds()
@@ -94,7 +94,7 @@ fn ast_schema_outputs_typed_tree() {
     );
 }
 
-// @kotowari[REQ-009, REQ-014]
+// @kotowari[REQ-009, REQ-014, REQ-042]
 #[test]
 fn ast_schema_without_schema_stops() {
     let dir = tempfile::tempdir().unwrap();
@@ -354,7 +354,7 @@ fn check_missing_title_has_no_line_number() {
     assert!(!stdout.contains(":1: missing_title:"));
 }
 
-// @kotowari[REQ-009, REQ-011]
+// @kotowari[REQ-009, REQ-011, REQ-042]
 #[test]
 fn check_missing_schema_stops_with_schema_not_found() {
     let dir = tempfile::tempdir().unwrap();
@@ -368,7 +368,7 @@ fn check_missing_schema_stops_with_schema_not_found() {
     assert!(stderr.contains("schema_not_found"));
 }
 
-// @kotowari[REQ-009, REQ-011]
+// @kotowari[REQ-009, REQ-011, REQ-042]
 #[test]
 fn check_unresolvable_schema_stops_with_schema_not_found() {
     let dir = tempfile::tempdir().unwrap();
@@ -386,7 +386,7 @@ fn check_unresolvable_schema_stops_with_schema_not_found() {
     assert!(stderr.contains("schema_not_found"));
 }
 
-// @kotowari[REQ-009]
+// @kotowari[REQ-009, REQ-042]
 #[test]
 fn check_unreadable_file_stops() {
     let dir = tempfile::tempdir().unwrap();
@@ -400,7 +400,7 @@ fn check_unreadable_file_stops() {
     assert!(stderr.contains("unreadable_file"));
 }
 
-// @kotowari[REQ-009, REQ-014, EX-004]
+// @kotowari[REQ-009, REQ-014, EX-004, REQ-042]
 #[test]
 fn check_broken_frontmatter_stops_with_frontmatter_invalid() {
     let dir = tempfile::tempdir().unwrap();
@@ -504,7 +504,7 @@ fn values_json_is_nested_by_path() {
     );
 }
 
-// @kotowari[REQ-009, REQ-014]
+// @kotowari[REQ-009, REQ-014, REQ-042]
 #[test]
 fn values_without_schema_stops_with_schema_not_found() {
     let dir = tempfile::tempdir().unwrap();
@@ -556,7 +556,7 @@ fn check_directory_reports_all_failing_documents() {
     assert_eq!(files[0]["findings"][0]["kind"], "undeclared_heading");
 }
 
-// @kotowari[REQ-010]
+// @kotowari[REQ-010, REQ-044]
 #[test]
 fn check_directory_skips_hidden_directories() {
     let dir = tempfile::tempdir().unwrap();
@@ -571,7 +571,7 @@ fn check_directory_skips_hidden_directories() {
     assert!(output.stdout.is_empty());
 }
 
-// @kotowari[REQ-010]
+// @kotowari[REQ-010, REQ-044]
 #[test]
 fn check_directory_does_not_follow_symlinks() {
     let outside = tempfile::tempdir().unwrap();
@@ -588,7 +588,7 @@ fn check_directory_does_not_follow_symlinks() {
     assert!(output.stdout.is_empty());
 }
 
-// @kotowari[REQ-010, REQ-009]
+// @kotowari[REQ-010, REQ-009, REQ-042]
 #[test]
 fn check_directory_stops_on_invalid_schema() {
     let dir = tempfile::tempdir().unwrap();
@@ -603,7 +603,7 @@ fn check_directory_stops_on_invalid_schema() {
     assert!(stderr.contains("schema_invalid"));
 }
 
-// @kotowari[REQ-010, REQ-009]
+// @kotowari[REQ-010, REQ-009, REQ-042, REQ-043]
 #[test]
 fn check_directory_stops_on_frontmatter_invalid_and_outputs_no_findings() {
     let dir = tempfile::tempdir().unwrap();
@@ -624,7 +624,7 @@ fn check_directory_stops_on_frontmatter_invalid_and_outputs_no_findings() {
     assert!(output.stdout.is_empty(), "停止のときは指摘を出力しない");
 }
 
-// @kotowari[REQ-010, REQ-009]
+// @kotowari[REQ-010, REQ-009, REQ-042, REQ-043]
 #[test]
 fn check_directory_stops_on_schema_not_found_and_outputs_no_findings() {
     let dir = tempfile::tempdir().unwrap();
@@ -645,7 +645,7 @@ fn check_directory_stops_on_schema_not_found_and_outputs_no_findings() {
     assert!(output.stdout.is_empty(), "停止のときは指摘を出力しない");
 }
 
-// @kotowari[REQ-010, REQ-009]
+// @kotowari[REQ-010, REQ-009, REQ-042]
 #[test]
 fn check_directory_stops_on_unreadable_file() {
     use std::os::unix::fs::PermissionsExt;

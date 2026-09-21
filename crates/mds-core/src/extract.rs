@@ -807,7 +807,7 @@ document:
         assert_eq!(v["tags"], json!(["a", "b", "", "c", ""]));
     }
 
-    // @kotowari[REQ-019, REQ-035]
+    // @kotowari[REQ-019, REQ-035, REQ-045]
     #[test]
     fn repeated_field_with_separator_extracts_array_of_arrays() {
         let schema = r#"
@@ -823,7 +823,7 @@ document:
         assert_eq!(v["tags"], json!([["a", "b"], ["c"]]));
     }
 
-    // @kotowari[REQ-030, REQ-035]
+    // @kotowari[REQ-030, REQ-035, REQ-046]
     #[test]
     fn separator_split_excludes_continuation_paragraphs() {
         let schema = r#"
@@ -863,7 +863,7 @@ document:
         );
     }
 
-    // @kotowari[REQ-029, REQ-037]
+    // @kotowari[REQ-029, REQ-037, REQ-045]
     #[test]
     fn separator_splits_value_into_string_elements() {
         let schema = r#"
@@ -1138,7 +1138,7 @@ document:
         );
     }
 
-    // @kotowari[REQ-030, REQ-035]
+    // @kotowari[REQ-030, REQ-035, REQ-046]
     #[test]
     fn field_extract_includes_continuation_paragraph() {
         let schema = r#"
