@@ -46,6 +46,14 @@ mds は常に、`frontmatter`に書いた相対パスを、`文書`の置かれ�
 
 mds は常に、`frontmatter`の "$schema" 以外のキーを読まず、`指摘`にもしない。
 
+### REQ-052: URL の認証情報を伏せる
+
+- 種類: event_driven
+- 出典: docs/decision/records/2026-09-21-mds-spec.md#A14, docs/decision/records/2026-09-21-mds-spec.md#A25
+- 検証: unit
+
+`停止`の説明に URL を載せるとき、mds はその authority にある認証情報を伏せる。
+
 ## 決定表
 
 ### TBL-003: スキーマの指定の解決
@@ -75,6 +83,13 @@ Scenario: 相対パスは文書の位置から解決する
   When "mds check" を実行する
   Then `スキーマ`は`文書`の位置から解決される
   And 終了コードは 0 である
+
+@id=EX-017 @about=REQ-052 @source=docs/decision/records/2026-09-21-mds-spec.md#A25
+Scenario: 認証情報を含む URL は伏せて出す
+  Given 認証情報を含む URL の`スキーマ`を指した`文書`があり、取得に失敗する
+  When "mds check" を実行する
+  Then 標準エラーに認証情報は出ない
+  And URL は伏せた形で出る
 
 @id=EX-006 @about=REQ-013 @source=docs/decision/records/2026-09-21-mds-spec.md#A14
 Scenario: 壊れたキャッシュは取得し直して回復する

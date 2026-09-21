@@ -249,3 +249,38 @@ fn schema_response_over_4mib_stops() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("schema_not_found"));
 }
+
+// @kotowari[REQ-052, EX-017]
+#[test]
+fn userinfo_in_a_schema_url_does_not_reach_the_error_output() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".mds")).unwrap();
+    // ポートを取得して閉じ、接続できない URL を作る
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    // 認証情報の形のリテラルはこのファイルに置かず、組み立てて渡す
+    let userinfo = format!("{}:{}", "example-user", "example-password");
+    let doc = write_file(
+        dir.path(),
+        "doc.md",
+        &format!(
+            "---\n$schema: http://{userinfo}@127.0.0.1:{port}/schema.yaml\n---\n# T-1234: 例\n"
+        ),
+    );
+    let output = mds()
+        .current_dir(dir.path())
+        .args(["check", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("example-password") && !stderr.contains("example-user"),
+        "認証情報が標準エラーに出ている: {stderr}"
+    );
+    assert!(
+        stderr.contains("***@127.0.0.1"),
+        "伏せた形で URL を出す: {stderr}"
+    );
+}

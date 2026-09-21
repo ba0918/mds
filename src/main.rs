@@ -202,6 +202,28 @@ const MAX_SCHEMA_BYTES: u64 = 4 * 1024 * 1024;
 /// ブロックしないための既定値。
 const SCHEMA_FETCH_TIMEOUT: Duration = Duration::from_millis(10_000);
 
+/// URL の authority にある認証情報（`user:pass@`）を伏せる。取得に失敗した URL は
+/// 誤りの説明として標準エラーに出るので、そこへ認証情報を持ち込まない（R2）。
+fn redact_userinfo(url: &str) -> String {
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+    let authority_start = scheme_end + 3;
+    let rest = &url[authority_start..];
+    let authority_end = rest
+        .find(['/', '?', '#'])
+        .map(|i| authority_start + i)
+        .unwrap_or(url.len());
+    let Some(at) = url[authority_start..authority_end].rfind('@') else {
+        return url.to_string();
+    };
+    format!(
+        "{}***{}",
+        &url[..authority_start],
+        &url[authority_start + at..]
+    )
+}
+
 /// `$schema` の参照を解決してスキーマ YAML の文字列を読む。URL はキャッシュを優先する。
 fn load_schema_yaml(doc_path: &Path, schema_ref: &SchemaRef) -> Result<String, Stop> {
     match mds_core::frontmatter::resolve_schema(doc_path, schema_ref) {
@@ -224,7 +246,7 @@ fn load_schema_yaml(doc_path: &Path, schema_ref: &SchemaRef) -> Result<String, S
                 .call()
                 .map_err(|e| Stop {
                     kind: "schema_not_found",
-                    detail: format!("cannot fetch schema {url}: {e}"),
+                    detail: format!("cannot fetch schema {}: {e}", redact_userinfo(&url)),
                 })?;
             let body = response
                 .body_mut()
@@ -234,7 +256,7 @@ fn load_schema_yaml(doc_path: &Path, schema_ref: &SchemaRef) -> Result<String, S
                 .read_to_string()
                 .map_err(|e| Stop {
                     kind: "schema_not_found",
-                    detail: format!("cannot read schema {url}: {e}"),
+                    detail: format!("cannot read schema {}: {e}", redact_userinfo(&url)),
                 })?;
             // キャッシュへの保存はベストエフォート。書けなくても取得した内容で進める
             if let Some(parent) = cache.parent() {
@@ -389,4 +411,48 @@ fn read_document(path: &Path) -> Result<String, Stop> {
         kind: "unreadable_file",
         detail: format!("{}: {}", path.display(), e),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 認証情報の形（"利用者:合言葉@"）のリテラルはこのファイルに置かない。
+    /// 走査の道具がそれを本物の認証情報として報告し、写した人が真似るため。
+    fn url_with_userinfo(user: &str, password: &str) -> String {
+        format!("https://{user}:{password}@example.com/ir.yaml")
+    }
+
+    // @kotowari[REQ-052]
+    #[test]
+    fn userinfo_in_a_url_is_hidden_before_it_reaches_a_message() {
+        let url = url_with_userinfo("example-user", "example-password");
+        assert_eq!(
+            redact_userinfo(&url),
+            "https://***@example.com/ir.yaml",
+            "認証情報を伏せた形にする"
+        );
+        assert!(
+            !redact_userinfo(&url).contains("example-password"),
+            "合言葉が残っていない"
+        );
+    }
+
+    // @kotowari[REQ-052]
+    #[test]
+    fn a_url_without_userinfo_is_left_alone() {
+        assert_eq!(
+            redact_userinfo("https://example.com/ir.yaml"),
+            "https://example.com/ir.yaml"
+        );
+    }
+
+    // @kotowari[REQ-052]
+    #[test]
+    fn an_at_sign_in_the_path_is_not_mistaken_for_userinfo() {
+        assert_eq!(
+            redact_userinfo("https://example.com/a@b/ir.yaml"),
+            "https://example.com/a@b/ir.yaml"
+        );
+    }
 }
